@@ -1,0 +1,27 @@
+Package: ADNIMetabo
+Title: Prepare and process ADNI metabolomics data
+Version: 0.99.0
+Date: 2024-12-17
+Authors@R: 
+    person("Dany", "Mukesha", , "danymukesha@gmail.com", 
+            role = c("aut", "cre"),
+           comment = c(ORCID = "0009-0001-9514-751X"))
+Description: ADNI provide a list of omics, among them there is metabolomics
+    data. We collected those data and curated them with closer look, for
+    helping researchers and scientists to exploite and navigate easily
+    into the ADNI metabolomic datasets. 
+License: Artistic-2.0
+URL: https://github.com/danymukesha/ADNIMetabo
+BugReports: https://support.bioconductor.org/tag/ADNIMetabo
+biocViews: Software
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Suggests: 
+    BiocStyle,
+    knitr,
+    RefManageR,
+    rmarkdown,
+    sessioninfo,
+    testthat
+VignetteBuilder: knitr
