@@ -1,0 +1,171 @@
+---
+title: "Introduction to ADNIMetabo"
+author: 
+  - name: Dany Mukesha
+    affiliation:
+    - Université Côte d'Azur
+    email: danymukesha@gmail.com
+abstract:
+  We provide a collection of datasets from the Alzheimer's Disease 
+  Neuroimaging Initiative (ADNI), a landmark study aimed at understanding 
+  the progression of Alzheimer's disease. This package includes various 
+  types of data, such as demographic information, clinical assessments, 
+  biomarker measurements, imaging data, and cognitive composite scores. 
+  The datasets are carefully curated and documented to facilitate easy 
+  access and analysis for researchers and clinicians. This vignette guides 
+  users through the process of loading and utilizing these datasets, 
+  providing examples of how to explore and analyze the data.
+output: 
+  BiocStyle::html_document:
+    self_contained: yes
+    toc: true
+    toc_float: true
+    toc_depth: 2
+    code_folding: show
+date: "`r doc_date()`"
+package: "`r pkg_ver('ADNIMetabo')`"
+vignette: >
+  %\VignetteIndexEntry{Introduction to ADNIMetabo}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}  
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+    collapse = TRUE,
+    comment = "#>",
+    crop = NULL
+)
+```
+# Introduction
+
+Alzheimer's disease is a complex and multifactorial neurodegenerative 
+disorder that affects millions of people worldwide. The Alzheimer's Disease 
+Neuroimaging Initiative (ADNI) is a multisite study launched in 2003 
+to collect and share data that can help researchers understand the progression 
+of Alzheimer's disease. The `ADNIMetabo` package is developed to make the ADNI 
+datasets readily available and easily accessible for analysis.
+
+In this package, it includes a range of datasets, each focusing on different 
+aspects of the ADNI study:
+
+- **Demographic data**: Participant demographic information such as age, sex, 
+education, ethnicity, and marital status.
+- **Clinical assessments**: Baseline and follow-up clinical data, including 
+diagnosis, CDR-SB, ADAS scores, MMSE, and RAVLT scores.
+- **Biomarker data**: Measurements of CSF ABETA, TAU, PTAU, FDG-PET, PIB, 
+and AV45.
+- **Imaging data**: MRI field strength, FreeSurfer software version, and 
+various brain region volumes.
+- **Cognitive domposite scores**: ADNI modified Preclinical Alzheimer's 
+Cognitive Composite (PACC) scores with Digit Symbol Substitution and Trails B.
+- **ECog scores**: ECog scores for both participants and study partners.
+
+This document will walk you through the steps to install and load the
+`ADNIMetabo` package, access the different datasets, and provide examples 
+of how to explore and analyze the data. It is intended to serve as a guide 
+for researchers, clinicians, and students who are interested in using the 
+ADNI datasets for their studies.
+
+We hope that by using the `ADNIMetabo` package, users can take advantage of
+the extensive and well-curated datasets from the ADNI study to advance our
+understanding of Alzheimer's disease and contribute to the development of 
+diagnostic and therapeutic strategies.
+
+Let's start with get access to various datasets from ADNI:
+
+```{r installation, eval=FALSE, include=TRUE}
+devtools::install_github("danymukesha/ADNIData") #for installation
+```
+
+```{r load_data}
+library(ADNIMetabo)
+
+data("demographic_data", package = "ADNIMetabo")
+data("baseline_clinical_data", package = "ADNIMetabo")
+data("follow_up_clinical_data", package = "ADNIMetabo")
+data("biomarker_data", package = "ADNIMetabo")
+data("imaging_data", package = "ADNIMetabo")
+data("cognitive_composite_data", package = "ADNIMetabo")
+data("ecog_scores_data", package = "ADNIMetabo")
+```
+
+## Exploring the datasets
+
+an example of how you can explore the demographic data:
+
+```{r view_demographic_data}
+head(demographic_data)
+```
+
+## Short analysis
+
+### Demographic summary
+
+```{r demographic_summary}
+# summarize age and education
+summary(demographic_data$AGE)
+summary(demographic_data$PTEDUCAT)
+
+# count the number of participants by sex and ethnicity
+table(demographic_data$PTGENDER)
+table(demographic_data$PTETHCAT)
+```
+
+### Clinical assessments
+
+
+```{r clinical_assessments}
+# summarize baseline CDR-SB and MMSE scores
+summary(baseline_clinical_data$CDRSB_bl)
+summary(baseline_clinical_data$MMSE_bl)
+
+# plot the distribution of baseline ADAS 11 scores
+hist(baseline_clinical_data$ADAS11_bl, main = "Baseline ADAS 11 Scores", xlab = "ADAS 11 Score")
+```
+
+### Biomarker analysis
+
+
+```{r biomarker_analysis}
+# summarize CSF ABETA and TAU levels
+summary(biomarker_data$ABETA)
+summary(biomarker_data$TAU)
+
+# plot the relationship between CSF ABETA and TAU
+plot(biomarker_data$ABETA, biomarker_data$TAU, main = "CSF ABETA vs TAU", xlab = "CSF ABETA", ylab = "CSF TAU")
+```
+
+## Short message
+
+The `ADNIMetabo` package will provide a set of datasets from the ADNI study, 
+making it easier to analyze and understand the progression of Alzheimer's 
+disease. This vignette has shown you how to load and explore these datasets, a
+nd how to perform basic analyses.
+
+For more detailed documentation on each dataset, please refer to the respective
+help files:
+
+```r
+?demographic_data
+?baseline_clinical_data
+?follow_up_clinical_data
+?biomarker_data
+?imaging_data
+?cognitive_composite_data
+?ecog_scores_data
+```
+
+## Acknowledgments
+
+The data included in this package is from the Alzheimer's Disease Neuroimaging
+Initiative (ADNI) database. ADNI is a multisite study launched in 2003 by the 
+National Institute on Aging (NIA), the National Institute of Biomedical Imaging
+and Bioengineering (NIBIB), the Food and Drug Administration (FDA), private 
+pharmaceutical companies, and non-profit organizations.
+
+```{r reproduce3, echo=FALSE}
+library("sessioninfo")
+options(width = 120)
+session_info()
+```

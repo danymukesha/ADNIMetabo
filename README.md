@@ -4,15 +4,12 @@
 # ADNIMetabo
 
 <!-- badges: start -->
-
-[![GitHub
-issues](https://img.shields.io/github/issues/danymukesha/ADNIMetabo)](https://github.com/danymukesha/ADNIMetabo/issues)
-[![GitHub
-pulls](https://img.shields.io/github/issues-pr/danymukesha/ADNIMetabo)](https://github.com/danymukesha/ADNIMetabo/pulls)
+<!-- [![GitHub issues](https://img.shields.io/github/issues/danymukesha/ADNIMetabo)](https://github.com/danymukesha/ADNIMetabo/issues)
+[![GitHub pulls](https://img.shields.io/github/issues-pr/danymukesha/ADNIMetabo)](https://github.com/danymukesha/ADNIMetabo/pulls) -->
 <!-- badges: end -->
 
-`ADNIMetabo` provides a collection of Metabolomics datasets from the
-Alzheimer’s Disease Neuroimaging Initiative (ADNI).
+`ADNIMetabo` could now also provide a collection of Metabolomics
+datasets from the Alzheimer’s Disease Neuroimaging Initiative (ADNI).
 
 ## Datasets accessible now
 
@@ -28,6 +25,7 @@ Alzheimer’s Disease Neuroimaging Initiative (ADNI).
 - **Cognitive composite scores**: Cognitive composite scores including
   mPACCdigit and mPACCtrailsB.
 - **ECog scores**: ECog scores for both participants and study partners.
+- **Metabolomic data**: \[will be available soon\]
 
 ## Acknowledgments
 
