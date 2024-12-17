@@ -4,7 +4,7 @@ library(tidyr)
 
 adnimerge <-  data.table::fread(
     input = "data-raw/ADNIMERGE_20Sep2024.csv",
-    sep = ",")
+    sep = ",") |> tibble::tibble()
 
 adnimerge_dict <-  data.table::fread(
     input = "data-raw/ADNIMERGE_DICT_20Sep2024.csv",
@@ -61,6 +61,10 @@ ecog_scores_data <- adnimerge %>%
            EcogPtDivatt, EcogPtTotal, EcogSPMem, EcogSPLang, EcogSPVisspat,
            EcogSPPlan, EcogSPOrgan, EcogSPDivatt, EcogSPTotal)
 
+# link RID to PTID
+RID_to_PTID <- adnimerge %>%
+    select(RID, PTID)
+
 # Save the data sets ====
 usethis::use_data(demographic_data, overwrite = TRUE)
 usethis::use_data(baseline_clinical_data, overwrite = TRUE)
@@ -69,3 +73,4 @@ usethis::use_data(biomarker_data, overwrite = TRUE)
 usethis::use_data(imaging_data, overwrite = TRUE)
 usethis::use_data(cognitive_composite_data, overwrite = TRUE)
 usethis::use_data(ecog_scores_data, overwrite = TRUE)
+usethis::use_data(RID_to_PTID, overwrite = TRUE)
