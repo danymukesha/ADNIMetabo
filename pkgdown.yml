@@ -1,0 +1,9 @@
+pandoc: 3.1.11
+pkgdown: 2.1.1
+pkgdown_sha: ~
+articles:
+  ADNIMetabo: ADNIMetabo.html
+last_built: 2024-12-18T22:51Z
+urls:
+  reference: https://danymukesha.github.io/ADNIMetabo/reference
+  article: https://danymukesha.github.io/ADNIMetabo/articles
