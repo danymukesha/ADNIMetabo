@@ -14,7 +14,7 @@ Description: Alzheimer's Disease Neuroimaging Initiative (ADNI) provide
     including demographic, clinical, biomarker, imaging, and cognitive 
     composite data.
 License: Artistic-2.0
-URL: https://github.com/danymukesha/ADNIMetabo
+URL: https://github.com/danymukesha/ADNIMetabo, https://danymukesha.github.io/ADNIMetabo/
 BugReports: https://support.bioconductor.org/tag/ADNIMetabo
 biocViews: Software
 Encoding: UTF-8
