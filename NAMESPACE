@@ -2,4 +2,6 @@
 
 export(ADNIMERGE)
 exportClasses(ADNIMERGE)
+importFrom(logspline,logspline)
+importFrom(logspline,rlogspline)
 importFrom(methods,setClass)
