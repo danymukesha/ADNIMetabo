@@ -31,6 +31,7 @@
 ADNIMERGE <- setClass(
     Class = 'ADNIMERGE',
     slots = list(
+        'complete_metadata' = 'tbl_df',
         'demographic_data' = 'tbl_df',
         'baseline_clinical_data' = 'tbl_df',
         'follow_up_clinical_data' = 'tbl_df',

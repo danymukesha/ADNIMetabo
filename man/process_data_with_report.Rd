@@ -4,7 +4,7 @@
 \alias{process_data_with_report}
 \title{Process and impute data below Limits of Detection (LOD) with reporting}
 \usage{
-process_data_with_report(raw_data, LODs, inj_type = "FIA")
+process_data_with_report(raw_data, LODs, inj_type = "FIA", qc_samples = FALSE)
 }
 \arguments{
 \item{raw_data}{is a data frame containing the raw data to be processed.
@@ -19,7 +19,10 @@ the column names in \code{raw_data}.
 }}
 
 \item{inj_type}{is the injection type. e.g.: FIA or UPLC.
-Please provide a corrected name of injection method iin quotes.}
+Please provide a corrected name of injection method in quotes.}
+
+\item{qc+samples}{If TRUE, you intend to process QC samples, otherwise
+study samples. default is FALSE.}
 }
 \value{
 a list with two components:

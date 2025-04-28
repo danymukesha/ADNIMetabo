@@ -14,7 +14,9 @@
 #'   the column names in `raw_data`.
 #'   - `LOD (µM)`: The limit of detection for each analyte.
 #' @param inj_type is the injection type. e.g.: FIA or UPLC.
-#'  Please provide a corrected name of injection method iin quotes.
+#'  Please provide a corrected name of injection method in quotes.
+#' @param qc+samples If TRUE, you intend to process QC samples, otherwise
+#'  study samples. default is FALSE.
 #'
 #' @return a list with two components:
 #'   - `processed_data`: is a processed version of the input `raw_data`.
@@ -45,7 +47,8 @@
 #' Then, we can sample from this fitted distribution and clip the values
 #' to stay within the desired range.
 #' @importFrom logspline logspline rlogspline
-process_data_with_report <- function(raw_data, LODs, inj_type = "FIA") {
+process_data_with_report <- function(raw_data, LODs, inj_type = "FIA",
+                                     qc_samples = FALSE) {
     library(logspline)
     col_to_remove <- c()
     removed_columns <- list()
@@ -60,17 +63,22 @@ process_data_with_report <- function(raw_data, LODs, inj_type = "FIA") {
     if (inj_type == "FIA") {
         for (i in LODs$`Short.Name/Injection.Number`) {
             if (i %in% colnames(raw_data)) {
-                lod <- LODs$`LOD (calc.) 1034741038/1 [µM]`[which( LODs$`Short.Name/Injection.Number` == i)]
+                lod <- LODs$`LOD (calc.) 1034741038/1 [µM]`[which(LODs$`Short.Name/Injection.Number` == i)]
                 lod <- lod |> as.numeric()
                 col_pos <- which(colnames(raw_data) == i)
-                raw_data[, col_pos] <- raw_data[, col_pos] |>
-                    dplyr::mutate_if(is.integer, as.numeric)
+                raw_data[, col_pos] <- ifelse(
+                    qc_samples,
+                    raw_data[, col_pos] |>
+                        dplyr::mutate_if(is.character, as.numeric),
+                    raw_data[, col_pos] |>
+                        dplyr::mutate_if(is.integer, as.numeric)
+                )
 
                 row_pos_lowLOD <- which(raw_data[, col_pos] <= lod)
                 if (length(row_pos_lowLOD) > 0) {
                     ki <- length(row_pos_lowLOD) + sum(is.na(raw_data[, col_pos]))
 
-                    if (ki == nrow(raw_data)) {
+                    if (ki == nrow(raw_data) && !qc_samples) {
                         col_to_remove <- c(col_to_remove, col_pos)
                         removed_columns[[i]] <- "All values below LOD or missing"
                     } else {
@@ -101,7 +109,7 @@ process_data_with_report <- function(raw_data, LODs, inj_type = "FIA") {
                 if (length(row_pos_lowLOD) > 0) {
                     ki <- length(row_pos_lowLOD) + sum(is.na(raw_data[, col_pos]))
 
-                    if (ki == nrow(raw_data)) {
+                    if (ki == nrow(raw_data) && !qc_samples) {
                         col_to_remove <- c(col_to_remove, col_pos)
                         removed_columns[[i]] <- "All values below LOD or missing"
                     } else {

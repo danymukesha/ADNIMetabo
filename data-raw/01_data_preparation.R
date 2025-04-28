@@ -1,6 +1,7 @@
 library(data.table)
 library(dplyr)
 library(tidyr)
+library(tidyverse)
 library(tibble)
 
 adnimerge <-  data.table::fread(
@@ -74,6 +75,7 @@ RID_to_PTID <- adnimerge %>%
 # re-merge all the datasets
 ADNIMERGE <- new(
     "ADNIMERGE",
+    complete_metadata = adnimerge,
     demographic_data = demographic_data,
     baseline_clinical_data = baseline_clinical_data,
     follow_up_clinical_data = follow_up_clinical_data,
@@ -101,6 +103,7 @@ usethis::use_data(visits, overwrite = TRUE)
 
 ## Explore the ADNI metadata ====
 
+library(DescrTab2)
 adnimerge$APOE4 <- adnimerge$APOE4 |> as.factor()
 adnimerge$PTAU <- adnimerge$PTAU |> as.numeric()
 adnimerge$TAU <- adnimerge$TAU |> as.numeric()
@@ -111,4 +114,90 @@ adnimerge |> dplyr::filter(VISCODE == "bl") |>
                   PTAU, TAU, Hippocampus, MOCA,
                   EcogPtTotal) |>
     dplyr::filter(DX_bl != "") |>
-    DescrTab2::descr(group = "DX_bl")
+    DescrTab2::descr(group = "DX_bl") -> ADNI_DX_bl
+
+
+## Prepare `adnimerge` dataset ====
+
+library(anscombiser)
+library(MOFA2)
+
+adnimerge <-  data.table::fread(
+    input = "data-raw/ADNIMERGE_20Sep2024.csv",
+    sep = ",") |> tibble::tibble()
+
+## select variables of interest ##
+# csf: ABETA_bl, PTAU_bl, TAU_bl
+# pet: AV45_bl
+# cognition: CDRSB, CDRSB_bl, ADAS13, ADAS13_bl, MMSE, MMSE_bl
+# mri: Hippocampus_bl
+# demo: AGE, PTGENDER, PTEDUCAT, APOE4
+# subj: RID, VISCODE, Years_bl, DX_bl
+adnimerge <- adnimerge %>%
+    select(
+        RID, VISCODE, Years_bl, DX_bl,
+        AGE, PTGENDER, PTEDUCAT, APOE4,
+        CDRSB, CDRSB_bl, ADAS13, ADAS13_bl, MMSE, MMSE_bl,
+        ABETA_bl, PTAU_bl, TAU_bl,
+        Hippocampus_bl,
+        AV45_bl
+    )
+
+## process CSF data ##
+adnimerge <- adnimerge %>%
+    mutate(
+        across(
+            c(ABETA_bl, PTAU_bl, TAU_bl),
+            ~stringr::str_replace_all(., c('<'='','>'='')) %>% as.numeric()
+        )
+    )
+
+# filter
+adnimerge <- adnimerge %>%
+    #filter(complete.cases(.)) %>% # here I tried to remove rows with at least 1 missing value
+    arrange(RID, Years_bl) %>%
+    mutate(
+        DX_bl = fct_recode(
+            DX_bl,
+            'CU' = 'CN',
+            'CU' = 'SMC',
+            'MCI' = 'EMCI',
+            'MCI' = 'LMCI'
+        )
+    )
+
+adnimerge <- adnimerge %>%
+    mutate(
+        PET_ABETA_STATUS_bl = as.integer(AV45_bl > 1.11),
+        APOE4 = as.integer(APOE4 >= 1),
+        PTGENDER = as.integer(PTGENDER == 'Male')
+    )
+
+adnimerge <- adnimerge %>%
+    rename(
+        PET_ABETA_bl = AV45_bl,
+        CSF_ABETA_bl = ABETA_bl,
+        CSF_PTAU_bl = PTAU_bl,
+        CSF_TAU_bl = TAU_bl,
+        GENDER = PTGENDER,
+        EDUCATION = PTEDUCAT,
+        YEARS_bl = Years_bl,
+        MRI_HIPP_bl = Hippocampus_bl
+    )
+
+
+data <- adnimerge %>% dplyr::filter(VISCODE == 'bl')
+
+# build and fit an aba model with multiple outcomes and predictors
+model <- data %>% aba_model() %>%
+    set_outcomes(ConvertedToAlzheimers, CSF_ABETA_STATUS_bl) %>%
+    set_predictors(
+        PLASMA_ABETA_bl, PLASMA_PTAU181_bl, PLASMA_NFL_bl,
+        c(PLASMA_ABETA_bl, PLASMA_PTAU181_bl, PLASMA_NFL_bl)
+    ) %>%
+    set_stats('glm') %>%
+    fit()
+
+# summarise the model results (coefficients and metrics)
+model_summary <- model_fit %>% summary()
+

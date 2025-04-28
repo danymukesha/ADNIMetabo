@@ -38,6 +38,16 @@ FIA_QC_samples <-  FIA_QC |>
                      Sample.Volume, Run.Number,
                      Injection.Number))
 
+K <- FIA_QC_samples |>
+    process_data_with_report(LODs = FIA_LODs,
+                             inj_type = "FIA",
+                             qc_samples = TRUE)
+
+FIA_QC_samples <- K$processed_data
+K$report$removed_columns
+K$report$imputed_columns
+rm(K)
+
 ## UPLC ====
 UPLC_QC <-  openxlsx::read.xlsx(
     xlsxFile = "data-raw/ADMC_DUKE_Q500_UPLC_QC_20230522.xlsx",
@@ -60,6 +70,15 @@ UPLC_QC_samples <- UPLC_QC |>
                      Sample.Volume, Run.Number,
                      Injection.Number))
 
+K <- UPLC_QC_samples |>
+    process_data_with_report(LODs = UPLC_LODs,
+                             inj_type = "UPLC",
+                             qc_samples = TRUE)
+
+UPLC_QC_samples <- K$processed_data
+K$report$removed_columns
+K$report$imputed_columns
+rm(K)
 # Metabo data ====
 ## FIA ====
 FIA_Metabo <- data.table::fread(
@@ -77,7 +96,7 @@ FIA_Metabo <- FIA_Metabo |>
 
 FIA_processed <- FIA_Metabo |>
     dplyr::filter(VISCODE2 == "bl") |>
-    add_metadata(other_info = adnimerge) |>
+    ## add_metadata(other_info = adnimerge) |>
     process_data_with_report(LODs = FIA_LODs, inj_type = "FIA")
 
 ## UPLC ====
@@ -85,7 +104,7 @@ UPLC_Metabo <- data.table::fread(
     input = "data-raw/ADMC_DUKE_Q500_UPLC_11Nov2024.csv",
     sep = ",") |> tibble::tibble()
 
-UPLC_Metabo <-UPLC_Metabo |>
+UPLC_Metabo <- UPLC_Metabo |>
     dplyr::select(-c(`Customer Sample Identification`,
                      `Sample Bar Code`, `Sample Type`,
                      `Sample Identification`, Species,
@@ -96,15 +115,37 @@ UPLC_Metabo <-UPLC_Metabo |>
 
 UPLC_processed <- UPLC_Metabo |>
     dplyr::filter(VISCODE2 == "bl") |>
-    add_metadata(other_info = adnimerge) |>
+    ## add_metadata(other_info = adnimerge) |>
     process_data_with_report(LODs = UPLC_LODs, inj_type = "UPLC")
+
+
+# Merge FIA and UPLC with their corresponding QCs ====
+
+All_Metabo <- UPLC_processed$processed_data |> dplyr::full_join(
+    FIA_processed$processed_data, by = c("RID" = "RID", "VISCODE2" = "VISCODE2"))
+
+
+All_Metabo |> dplyr::filter(VISCODE2 == "bl") |>
+    dplyr::select(-c(VISCODE2)) |>
+    add_metadata(other_info = adnimerge)
+
+
+# PCA for FIA raw ====
+
+# replace space by point in metabolite names
+colnames(FIA_Metabo) <-
+    gsub(" ", ".", FIA_Metabo |> colnames())
 
 raw_data <- FIA_processed$processed_data |>
     cbind(UPLC_processed$processed_data[-c(1:9)]) |>
     data.frame()
 
-raw_data1 <- raw_data[-c(1:9)] |> dplyr::mutate_at(colnames(raw_data[-c(1:9)]), as.numeric)
+raw_data1 <- raw_data[-c(1:9)] |>
+    dplyr::mutate_at(colnames(raw_data[-c(1:9)]), as.numeric)
 raw_data1 <- raw_data1[sapply(raw_data1, is.numeric)]
+
+dplyr::bind_rows(raw_data1, cbind(FIA_QC_samples |> dplyr::select(-1),
+                         UPLC_QC_samples |> dplyr::select(-1)))
 
 mypca <-  prcomp(raw_data1)
 pca <- cbind(raw_data[1:9], mypca$x[], 1:2)
