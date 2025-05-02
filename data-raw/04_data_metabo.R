@@ -39,7 +39,7 @@ FIA_QC_samples <-  FIA_QC |>
                      Injection.Number))
 
 K <- FIA_QC_samples |>
-    process_data_with_report(LODs = FIA_LODs,
+    ADNIMetabo:::process_data_with_report(LODs = FIA_LODs,
                              inj_type = "FIA",
                              qc_samples = TRUE)
 
@@ -68,17 +68,19 @@ UPLC_QC_samples <- UPLC_QC |>
                      Sample.Identification, Species,
                      Material, Well.Position,
                      Sample.Volume, Run.Number,
-                     Injection.Number))
+                     Injection.Number, ))
 
 K <- UPLC_QC_samples |>
-    process_data_with_report(LODs = UPLC_LODs,
+    ADNIMetabo:::process_data_with_report(LODs = UPLC_LODs,
                              inj_type = "UPLC",
                              qc_samples = TRUE)
 
-UPLC_QC_samples <- K$processed_data
+UPLC_QC_samples <- K$processed_data |>
+    mutate_at(vars(-c(Plate.Bar.Code)), as.numeric)
 K$report$removed_columns
 K$report$imputed_columns
 rm(K)
+
 # Metabo data ====
 ## FIA ====
 FIA_Metabo <- data.table::fread(
@@ -87,17 +89,19 @@ FIA_Metabo <- data.table::fread(
 
 FIA_Metabo <- FIA_Metabo |>
     dplyr::select(-c(`Customer Sample Identification`,
-                     `Sample Bar Code`, `Sample Type`,
+                     `Sample Bar Code`, # `Sample Type`,
                      `Sample Identification`, Species,
                      Material, `Well Position`,
                      `Sample Volume`, `Run Number`,
                      `Injection Number`,
-                     EXAMDATE, `Plate Bar Code`, update_stamp))
+                     EXAMDATE, #`Plate Bar Code`,
+                     update_stamp))
 
 FIA_processed <- FIA_Metabo |>
-    dplyr::filter(VISCODE2 == "bl") |>
+    dplyr::rename(VISCODE = VISCODE2) |>
+    ## dplyr::filter(VISCODE == "bl") |>
     ## add_metadata(other_info = adnimerge) |>
-    process_data_with_report(LODs = FIA_LODs, inj_type = "FIA")
+    ADNIMetabo:::process_data_with_report(LODs = FIA_LODs, inj_type = "FIA")
 
 ## UPLC ====
 UPLC_Metabo <- data.table::fread(
@@ -106,28 +110,88 @@ UPLC_Metabo <- data.table::fread(
 
 UPLC_Metabo <- UPLC_Metabo |>
     dplyr::select(-c(`Customer Sample Identification`,
-                     `Sample Bar Code`, `Sample Type`,
+                     `Sample Bar Code`, #`Sample Type`,
                      `Sample Identification`, Species,
                      Material, `Well Position`,
                      `Sample Volume`, `Run Number`,
                      `Injection Number`,
-                     EXAMDATE, `Plate Bar Code`, update_stamp))
+                     EXAMDATE, # `Plate Bar Code`,
+                     update_stamp))
 
 UPLC_processed <- UPLC_Metabo |>
-    dplyr::filter(VISCODE2 == "bl") |>
+    dplyr::rename(VISCODE = VISCODE2) |> # renamed for f(x) ADNIMetabo:::add_metadata
+    # dplyr::filter(VISCODE == "bl") |>
     ## add_metadata(other_info = adnimerge) |>
-    process_data_with_report(LODs = UPLC_LODs, inj_type = "UPLC")
+    ADNIMetabo:::process_data_with_report(LODs = UPLC_LODs, inj_type = "UPLC")
 
 
-# Merge FIA and UPLC with their corresponding QCs ====
+# Merge QCs with Metabo ====
+## FIA ====
+FIA_QC_samples <- FIA_QC_samples |>
+    # summarise(across(where(is.numeric), ~ mean(.x, na.rm = TRUE))) |>
+    dplyr::mutate(`RID` = 0, .before = Plate.Bar.Code) |>
+    dplyr::mutate(`VISCODE` = "-", .before = Plate.Bar.Code) |>
+    dplyr::mutate(`Sample Type` = "QC", .after = Plate.Bar.Code)
 
-All_Metabo <- UPLC_processed$processed_data |> dplyr::full_join(
-    FIA_processed$processed_data, by = c("RID" = "RID", "VISCODE2" = "VISCODE2"))
+# replace space by point in metabolite names
+colnames(FIA_QC_samples) <-
+    gsub("\\.", " ", FIA_QC_samples |> colnames())
+
+commcols <- intersect(names(FIA_QC_samples),
+                      names(FIA_processed$processed_data))
+
+FIA_processed$qc_w_metabo_data <- bind_rows( # lst()
+    select(FIA_QC_samples, all_of(commcols)),
+    select(FIA_processed$processed_data, all_of(commcols))
+    )
+
+## UPLC ====
+UPLC_QC_samples <- UPLC_QC_samples |>
+    # summarise(across(where(is.numeric), ~ mean(.x, na.rm = TRUE))) |>
+    dplyr::mutate(`RID` = 0, .before = Trigonelline) |>
+    dplyr::mutate(`VISCODE` = "-", .before = Trigonelline) |>
+    dplyr::mutate(`Sample Type` = "QC", .before = Trigonelline) # `Trigonelline`: first metabolite in column
+
+# replace space by point in metabolite names
+colnames(UPLC_QC_samples) <-
+    gsub("\\.", " ", UPLC_QC_samples |> colnames())
+
+commcols <- intersect(names(UPLC_QC_samples),
+                      names(UPLC_processed$processed_data))
+
+UPLC_processed$qc_w_metabo_data <- bind_rows( # lst()
+    select(UPLC_QC_samples, all_of(commcols)),
+    select(UPLC_processed$processed_data, all_of(commcols))
+)
 
 
-All_Metabo |> dplyr::filter(VISCODE2 == "bl") |>
-    dplyr::select(-c(VISCODE2)) |>
-    add_metadata(other_info = adnimerge)
+rm("FIA_QC", "UPLC_QC")
+
+# Save the data sets ====
+usethis::use_data(FIA_LODs, overwrite = TRUE)
+usethis::use_data(FIA_QC_samples, overwrite = TRUE)
+usethis::use_data(FIA_Metabo, overwrite = TRUE)
+usethis::use_data(UPLC_LODs, overwrite = TRUE)
+usethis::use_data(UPLC_QC_samples, overwrite = TRUE)
+usethis::use_data(UPLC_Metabo, overwrite = TRUE)
+
+usethis::use_data(UPLC_processed, overwrite = TRUE)
+usethis::use_data(FIA_processed, overwrite = TRUE)
+
+
+## todo: recheck well the above code, but everything should be good.
+
+All_Metabo <- UPLC_processed$qc_w_metabo_data |> dplyr::full_join(
+    FIA_processed$qc_w_metabo_data, by = c("RID" = "RID", "VISCODE" = "VISCODE"))
+
+# let's load a collection of key metrics and observations for all ADNI participants
+adnimerge <-  data.table::fread(
+    input = "data-raw/ADNIMERGE_20Sep2024.csv",
+    sep = ",") |> tibble::tibble() |>
+    dplyr::filter(VISCODE == "bl")
+
+All_metabo <- All_Metabo |>
+    ADNIMetabo:::add_metadata(other_info = adnimerge)
 
 
 # PCA for FIA raw ====
@@ -202,15 +266,6 @@ splom_plot <- plot_ly(
 
 splom_plot
 
-rm("FIA_QC", "UPLC_QC")
-
-# Save the data sets ====
-usethis::use_data(FIA_LODs, overwrite = TRUE)
-usethis::use_data(FIA_QC_samples, overwrite = TRUE)
-usethis::use_data(FIA_Metabo, overwrite = TRUE)
-usethis::use_data(UPLC_LODs, overwrite = TRUE)
-usethis::use_data(UPLC_QC_samples, overwrite = TRUE)
-usethis::use_data(UPLC_Metabo, overwrite = TRUE)
 
 
 

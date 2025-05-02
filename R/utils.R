@@ -169,6 +169,11 @@ process_data_with_report <- function(raw_data, LODs, inj_type = "FIA",
     }
     message("Total imputed: ", length(imputed_columns))
 
+    # if (inj_type == "UPLC") {
+    #     raw_data <- raw_data |>
+    #         mutate_at(vars(-c(RID, VISCODE)), as.numeric)
+    # }
+
     return(list(processed_data = raw_data, report = report))
 }
 
@@ -201,13 +206,20 @@ fncols <- function(data, cname) {
 #'
 #' @param mt Main dataset.
 #' @param other_info Additional information containing DX_bl, AGE, SEX, ... data.
+#' @param baseline When TRUE, the metadata is filter by baseline.
+#' otherwise no filter. TRUE is set as default.
 #' @return Data frame with added DX_bl, AGE, SEX, ... information.
 #' @examples
 #' \dontrun{
 #' updated_data <- add_metadata(mt, other_info)
 #' }
 add_metadata <- function(mt,
-                     other_info) {
+                     other_info, baseline = TRUE) {
+
+    if (baseline == TRUE) {
+        adnimerge |> dplyr::filter(VISCODE == "bl")
+    }
+
     samples <- Filter(nzchar, mt$RID)
     ## Disease baseline
     mt$DX_bl <- NA
@@ -236,7 +248,7 @@ add_metadata <- function(mt,
         pattern <- sample
         k <- which(other_info$RID %in% pattern)
         j <- which(grepl(paste0("\\b", sample, "\\b"), mt$RID))
-        visits <- mt |> dplyr::slice(j) |> select(VISCODE2)
+        visits <- mt |> dplyr::slice(j) |> select(VISCODE)
         allSame <- function(x) length(unique(x)) == 1
         if (length(j) > 0) {
             # Disease
@@ -276,7 +288,7 @@ add_metadata <- function(mt,
                 dplyr::mutate_at("ABETA", as.numeric)
 
             mt[j, "ABETA"] <- ABETA |>
-                dplyr::filter(VISCODE %in% list(visits$VISCODE2)[[1]]) |>
+                dplyr::filter(VISCODE %in% list(visits$VISCODE)[[1]]) |>
                 dplyr::select(ABETA)
 
             # TAU baseline and other timepoints
@@ -292,7 +304,7 @@ add_metadata <- function(mt,
                 dplyr::mutate_at("TAU", as.numeric)
 
             mt[j, "TAU"] <- TAU |>
-            dplyr::filter(VISCODE %in% list(visits$VISCODE2)[[1]]) |>
+            dplyr::filter(VISCODE %in% list(visits$VISCODE)[[1]]) |>
             dplyr::select(TAU)
             # PTAU baseline
             PTAU <- other_info[k, ]$TAU
@@ -307,7 +319,7 @@ add_metadata <- function(mt,
                 dplyr::mutate_at("PTAU", as.numeric)
 
             mt[j, "PTAU"] <- PTAU |>
-            dplyr::filter(VISCODE %in% list(visits$VISCODE2)[[1]]) |>
+            dplyr::filter(VISCODE %in% list(visits$VISCODE)[[1]]) |>
             dplyr::select(PTAU)
             # APOE4
             APOE4 <- other_info[k, ]$APOE4
@@ -321,7 +333,7 @@ add_metadata <- function(mt,
         }
     }
     mt <- mt |>
-        dplyr::relocate(DX_bl, .after = VISCODE2) |>
+        dplyr::relocate(DX_bl, .after = VISCODE) |>
         dplyr::relocate(SEX, .after = DX_bl)  |>
         dplyr::relocate(AGE, .after = SEX) |>
         dplyr::relocate(ABETA, .after = AGE) |>

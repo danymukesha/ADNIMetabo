@@ -117,7 +117,20 @@ adnimerge |> dplyr::filter(VISCODE == "bl") |>
     DescrTab2::descr(group = "DX_bl") -> ADNI_DX_bl
 
 
+# The ADNI dataset contains longitudinal clinical diagnoses for participants,
+# including baseline diagnoses (DX_bl) and follow-up diagnoses (DX).
+# Tracking transitions between diagnostic categories
+# (e.g., cognitively normal [CN] to mild cognitive impairment [MCI],
+# or MCI to dementia) is critical for analyzing disease progression.
+#
+# To support the harmonization and longitudinal tracking of clinical diagnoses
+# in the ADNI dataset, I implemented an algorithm designed to facilitate
+# the identification and categorization of diagnostic transitions over time.
+# This algorithm is critical for downstream analyses where the trajectory
+# of disease progression, particularly conversion to AD is a central focus.
+
 ## Prepare `adnimerge` dataset ====
+
 
 library(anscombiser)
 library(MOFA2)

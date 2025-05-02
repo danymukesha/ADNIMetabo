@@ -4,12 +4,15 @@
 \alias{add_metadata}
 \title{Add DX_bl, AGE, SEX, ... data}
 \usage{
-add_metadata(mt, other_info)
+add_metadata(mt, other_info, baseline = TRUE)
 }
 \arguments{
 \item{mt}{Main dataset.}
 
 \item{other_info}{Additional information containing DX_bl, AGE, SEX, ... data.}
+
+\item{baseline}{When TRUE, the metadata is filter by baseline.
+otherwise no filter. TRUE is set as default.}
 }
 \value{
 Data frame with added DX_bl, AGE, SEX, ... information.
