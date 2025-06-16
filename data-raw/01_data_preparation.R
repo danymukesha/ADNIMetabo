@@ -3,6 +3,7 @@ library(dplyr)
 library(tidyr)
 library(tidyverse)
 library(tibble)
+devtools::load_all()
 
 adnimerge <-  data.table::fread(
     input = "data-raw/ADNIMERGE_20Sep2024.csv",
@@ -88,6 +89,63 @@ ADNIMERGE <- new(
     misc_data = list()     # optional miscellaneous data
 )
 
+# ADNIMERGE revision ####
+# Relevant Columns of ADNIMERGE
+adnim_cols <- c("RID", "PTID", "VISCODE", "AGE", "PTGENDER","PTEDUCAT", "APOE4",
+                "DX_bl", "DX",
+                "FDG_bl", "FDG",
+                "AV45_bl", "AV45",
+                "ABETA_bl", "ABETA",
+                "TAU_bl", "TAU",
+                "ADAS11_bl", "ADAS11",
+                "ADAS13_bl", "ADAS13",
+                "ADASQ4_bl", "ADASQ4",
+                "LDELTOTAL_BL", "LDELTOTAL",
+                "MMSE_bl", "MMSE", "MOCA", "MOCA_bl",
+                "RAVLT_immediate_bl", "RAVLT_immediate",
+                "RAVLT_learning_bl", "RAVLT_learning",
+                "RAVLT_forgetting_bl", "RAVLT_forgetting",
+                "ICV_bl", "ICV")
+
+
+# Subset Columns
+adnim <- adnimerge[, adnim_cols]
+
+# Create Dummy Variables for DX Conversion, Gender, Education, APOE, and Holdout
+adnim <- adnim %>%
+    mutate(ad_conv = dplyr::if_else(
+               .data$DX_bl != "AD" & .data$DX == "Dementia", 1L, 0L),
+           cn_to_ad = dplyr::if_else(
+               .data$DX_bl == "CN" & .data$DX == "Dementia", 1L, 0L),
+           cn_to_mci = dplyr::if_else(
+               .data$DX_bl == "CN" & .data$DX == "MCI", 1L, 0L),
+           emci_to_ad = dplyr::if_else(
+               .data$DX_bl == "EMCI" & .data$DX == "Dementia", 1L, 0L),
+           lmci_to_ad = dplyr::if_else(
+               .data$DX_bl == "LMCI" & .data$DX == "Dementia", 1L, 0L),
+           #MCI_AD = ifelse(DX_bl %in% c("EMCI", "LMCI") & DX == "Dementia", 1, 0),
+           .after = "DX",
+           APOE4_1 = ifelse(APOE4 == 1, 1, 0),
+           APOE4_2 = ifelse(APOE4 == 2, 1, 0),
+           Male = ifelse(PTGENDER == "Male", 1, 0),
+           NoHighSch = ifelse(PTEDUCAT < 12, 1, 0),
+           HighSch = ifelse(PTEDUCAT == 12, 1, 0),
+           SomeCollege = ifelse(PTEDUCAT > 12 & PTEDUCAT < 16, 1, 0),
+           CollegePlus = ifelse(PTEDUCAT >= 16, 1, 0)
+           )
+# Conversion Data
+ad_conv <- adnim %>%
+    filter(ad_conv == 1) %>%
+    dplyr::select(RID)
+adnim <- adnim %>%
+    mutate(ad_con_any = ifelse(RID %in% unique(ad_conv$RID), 1, 0))
+
+any_conv <- adnim %>%
+    filter(ad_conv == 1 | CN_MCI == 1) %>%
+    select(RID)
+adnim <- adnim %>%
+    mutate(any_con = ifelse(RID %in% unique(any_conv$RID), 1, 0))
+
 # Save the data sets ====
 usethis::use_data(demographic_data, overwrite = TRUE)
 usethis::use_data(baseline_clinical_data, overwrite = TRUE)
@@ -99,7 +157,8 @@ usethis::use_data(ecog_scores_data, overwrite = TRUE)
 usethis::use_data(RID_to_PTID, overwrite = TRUE)
 usethis::use_data(ADNIMERGE, overwrite = TRUE)
 usethis::use_data(visits, overwrite = TRUE)
-usethis::use_data(visits, overwrite = TRUE)
+usethis::use_data(adnimerge, overwrite = TRUE)
+usethis::use_data(adnim, overwrite = TRUE)
 
 ## Explore the ADNI metadata ====
 

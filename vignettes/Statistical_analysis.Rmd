@@ -1,0 +1,796 @@
+---
+title: "Biocrates data analysis report"
+author: "Firalis/Lodiag"
+date: "`2024-07-30`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    self_contained: true
+  word_document:
+    toc: true
+  pdf_document:
+    toc: true
+always_allow_html: true
+editor_options:
+  markdown:
+    wrap: 72
+bibliography: references.bib
+---
+
+```{r libraries}
+library(knitr)
+library(ADNIMetabo)
+
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(gridExtra)
+library(cowplot)
+library(ggrepel)
+
+library(FactoMineR)
+library(data.table)
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, 
+                      collapse = TRUE, comment = "#>")
+
+# knitr::opts_chunk$set(echo = TRUE)
+```
+
+## **Background**
+
+Alzheimer's disease (AD) poses a significant global health challenge and
+current diagnostic methods, particularly those involving cerebro-spinal
+fluid (CSF), are invasive and often lack the sensitivity needed for
+early detection. Studies has highlighted the potential of blood-based
+biomarkers, particularly lipidomic profiles, to identify pre-clinical AD
+effectively [@mapstone2014]. As an example, Lipidomic studies have
+identified specific lipids in serum that can predict progression to mild
+cognitive impairment or AD with over 90% accuracy within 2-3 years
+[@oka2024]. In addition, blood tests measuring phosphorylated tau and
+amyloid ratios have demonstrated high diagnostic
+accuracy[@palmqvist2024]. Metabolomic analyses have further revealed key
+metabolic alterations associated with AD, including reduced plasmalogen
+lipids and increased gangliosides, suggesting that a combination of
+lipidomic and metabolomic data could significantly enhance early
+detection strategies[@oka2024]. However, the practical application of
+these biomarkers in diverse populations and clinical settings still
+requires extensive validation[@oka2024]. In this study, we aim to
+contribute by providing a new insight into metabolomic biomarkers using
+Biocrates panels, evaluating metabolic alterations that may be
+associated to AD.
+
+------------------------------------------------------------------------
+
+> | Source code and results
+
+# Data preparation and quality control
+
+## Missing data analysis
+
+```{r missing data}
+data0 <- data.table::fread(input = "../data-raw/adni_serum_ADvsHC.csv")
+
+data0[, Gender := toupper(Gender)]
+data0[Gender %in% c("1", "M"), Gender := "MALE"]
+data0[Gender %in% c("2", "F"), Gender := "FEMALE"]
+data0[, `:=`(Gender = factor(Gender))]
+
+biomarkers <- colnames(data0)[8:dim(data0)[2]]
+data0[, `:=`(Gender = factor(Gender))]
+data0$Allgr <- as.factor(data0$Allgr)
+data0$Allgr <- relevel(data0$Allgr, ref = "AD")
+data0$Allgr <- relevel(data0$Allgr, ref = "CN")
+metadata <- c("Gender", "Allgr", "Age" )
+```
+
+
+# Descriptive Statistics
+
+```{r descrptive_plot, fig.width=12, fig.height=10, fig.align='center', out.width='100%'}
+color_palette <- c("#1f78b4", "#33a02c")
+color_gender <- c("#9f9f1a", "#6a3d1a")
+
+data0 <- as.data.table(data0)
+
+gender_cohort <- data0 |>
+  dplyr::group_by(Allgr, Gender) |>
+  dplyr::summarise(patients = dplyr::n()) |>
+  dplyr::mutate(group_proportion = scales::percent(patients / sum(patients)))
+
+p2 <- ggplot(gender_cohort, aes(x = Allgr, y = patients, fill = Gender)) +
+  geom_bar(stat = "identity", position = "stack",width = 0.5) +
+  geom_text(aes(label = paste0(patients, "\n(", group_proportion, ")")), 
+            position = position_stack(vjust = 0.5), 
+            size = 3, color = "white") +
+  scale_fill_manual(values = color_gender) +
+  labs(title = "Sex distribution across groups",
+       x = "Groups", y = "Number of Patients", fill = "Sex") +
+  theme_bw() +
+   theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5))
+
+p3 <- ggplot(data0, aes(x = Allgr, y = Age)) +
+  geom_violin(aes(fill = Gender), trim = FALSE, color = "black", 
+              alpha = 0.6, position = position_dodge(1)) +
+  geom_boxplot(width = 0.2, position = position_dodge(1), color = "black", 
+               aes(fill = Gender), outlier.shape = NA) +
+  scale_fill_manual(values = color_gender) +
+  scale_color_manual(values = color_gender) +
+  labs(title = "Age distribution across groups", 
+       x = "Groups", y = "Age") +
+  theme_bw() + ylim(20, 100) + guides(fill = "none") +
+  theme(legend.position = "right", plot.title = element_text(hjust = 0.5))
+
+
+# 3. Age distribution across groups (violin plot)
+p3 <- ggplot(data0, aes(x = Allgr, y = Age)) +
+  geom_violin(aes(fill = Gender), trim = FALSE, color = "black", 
+              alpha = 0.6, position = position_dodge(1)) +
+  geom_boxplot(width = 0.2, position = position_dodge(1), color = "black", 
+               aes(fill = Gender), outlier.shape = NA) +
+  scale_fill_manual(values = color_gender) +
+  scale_color_manual(values = color_gender) +
+  labs(title = "Age distribution across groups", 
+       x = "Groups", y = "Age") +
+  theme_bw() + ylim(20, 100) + guides(fill = "none") +
+  theme(legend.position = "right", plot.title = element_text(hjust = 0.5))
+
+# 4. APOE genotype distribution across sub-groups (violin plot)
+p4 <- data0 |>
+  dplyr::group_by(Allgr, Gender, APOE4) |>
+  dplyr::summarise(n = dplyr::n()) |>
+  ggplot(aes(x = Allgr, y = n, fill = Gender)) + 
+  scale_fill_manual(values = color_gender) +
+  geom_col(position = "dodge") + 
+  facet_wrap(~APOE4) +
+  labs(title = "Distribution by Diagnosis, Sex, and APOE4",
+       x = "Diagnosis", y = "Count") +
+    theme_bw() +
+  theme(legend.position = "none", plot.title = element_text(hjust = 0.05),
+        legend.text = element_text(size = 11),
+        strip.text = element_text(size = 12))
+
+combined_plot <- gridExtra::grid.arrange(
+  ggpubr::ggarrange(p3, p2, common.legend = TRUE,
+            legend="right", ncol = 2), 
+  p4, nrow = 2)
+
+combined_plot1 <- ggpubr::as_ggplot(combined_plot) +                        
+    cowplot::draw_plot_label(label = c("A)", "B)", "C)"), size = 15,
+                    x = c(0.03, 0.47, 0.03), y = c(1, 1, 0.5))
+ggsave("pictures/dea_approfond.png", combined_plot1, 
+       width = 7.5, height = 7.5, dpi = 300)
+
+```
+
+
+```{r descriptive_stats_by_age}
+summary <- data0 |>
+  dplyr::group_by(Allgr) |>
+  dplyr::summarise(
+    n = dplyr::n(),
+    Age_mean = round(mean(Age, na.rm = TRUE), 1),
+    Age_sd = round(sd(Age, na.rm = TRUE), 1),
+    Age_min = min(Age, na.rm = TRUE),
+    Age_max = max(Age, na.rm = TRUE)
+  )
+DT::datatable(summary, caption = "Descriptive statistics for age by subgroup", 
+              colnames = c("Allgr", "N", "Mean", "SD", "Min", "Max")) 
+```
+
+# PCA results
+
+## Extremes and outliers
+
+```{r pca1}
+data2 <- data0 # missing data was already handled before
+biomarkers <- data2[, 8:ncol(data2)]
+coul = rainbow(3)
+acp = FactoMineR::PCA(biomarkers)
+
+plot(as.numeric(acp$ind$coord[,1]), as.numeric(acp$ind$coord[,2]),
+     col = coul[as.factor(data2$Allgr)], main = "Representation of sample by group",
+     xlab = paste("PC1: ", round(acp$eig[1,2],2), "%", sep = ""),
+     ylab = paste("PC2: ",round(acp$eig[2,2],2),"%",sep = ""),pch = 16)
+abline(v = 0,h = 0,lty = 3)
+legend("topleft",legend = levels(as.factor(data2$Allgr)),pch = 16,col = coul, bty = 'n')
+coul = rainbow(3)
+
+plot(as.numeric(acp$ind$coord[,1]), as.numeric(acp$ind$coord[,2]),
+     col = coul[as.factor(data2$APOE4)], main = "Representation of sample by APOE4", 
+     xlab = paste("PC1: ",round(acp$eig[1,2],2),"%",sep = ""), 
+     ylab = paste("PC2: ", round(acp$eig[2,2],2),"%",sep = ""), pch = 16)
+abline(v = 0,h = 0,lty = 3)
+legend("topleft", legend = levels(as.factor(data2$APOE4)), pch = 16, col = coul, bty = 'n')
+coul = rainbow(2)
+
+plot(as.numeric(acp$ind$coord[,1]), as.numeric(acp$ind$coord[,2]), 
+     col = coul[as.factor(data2$Gender)], main = "Representation of sample by sex", 
+     xlab = paste("PC1: ",round(acp$eig[1,2],2), "%", sep = ""), 
+     ylab = paste("PC2: ",round(acp$eig[2,2],2),"%", sep = ""), pch = 16)
+abline(v = 0, h = 0, lty = 3)
+legend("topleft", legend = levels(as.factor(data2$Gender)), pch = 16, col = coul,bty = 'n')
+```
+
+
+# Multivariave ANOVA to evaluate Batch, Age and Gender effect
+
+```{r anova, messAge=FALSE}
+
+data2$Allgr = as.factor(data2$Allgr)
+data2$Gender = as.factor(data2$Gender)
+data2$Plate = as.factor(data2$Plate)
+
+# Remove rows with missing values
+# data2 <- na.omit(data2)
+
+data2 <- as.data.frame(data2)
+test = NULL
+for (i in 7:ncol(data2)) {
+  y <- data2[[i]]
+  if (!is.numeric(y) || anyNA(y)) next
+  test = rbind(test, c(colnames(data2)[i], summary(
+    aov(
+      data2[, i] ~ data2$Plate + data2$Gender * data2$Age + data2$Allgr,
+      na.rm = T
+    )
+  )[[1]][["Pr(>F)"]]))
+}
+test = test[,-7]
+colnames(test) = c("Biomarker", "Batch", "Gender", "Age", "Group", "Gender:Age")
+test = as.data.table(test)
+
+test_long = melt(test, id.vars = c("Biomarker"))
+test_long$value = as.numeric(test_long$value)
+test_long$pvalue_adjusted = p.adjust(test_long$value, method = "fdr")
+#test_wide <- data.table::dcast(test_long, Biomarker ~ variable, 
+#                   value.var =  c("value","pvalue_adjusted"))
+
+test_wide <- data.table::dcast(
+  test_long |> as.data.table(),
+  Biomarker ~ variable,
+  value.var = c("value", "pvalue_adjusted")
+)
+
+```
+
+```{r anovagraphs, messAge=FALSE}
+anova_results <- test_wide
+
+group_plot <- ggplot(anova_results, aes(value_Group)) +
+  geom_histogram(fill = "#56B4E9", alpha = 0.8) +
+  geom_vline(xintercept = c(0.05), linetype = "dashed", color = "red") +
+  ggtitle("group p-values distribution") +
+  ylab("Count") +
+  xlab("p-values") +
+  theme_bw()
+
+batch_plot <- ggplot(anova_results, aes(value_Batch)) +
+  geom_histogram(fill = "#56B4E9", alpha = 0.8) +
+  geom_vline(xintercept = c(0.05), linetype = "dashed", color = "red") +
+  ggtitle("batch p-values distribution") +
+  ylab("Count") +
+  xlab("p-values") +
+  theme_bw()
+
+Age_plot <- ggplot(anova_results, aes(value_Age)) +
+  geom_histogram(fill = "#56B4E9", alpha = 0.8) +
+  geom_vline(xintercept = c(0.05), linetype = "dashed", color = "red") +
+  ggtitle("age p-values distribution") +
+  ylab("Count") +
+  xlab("p-values") +
+  theme_bw()
+
+gender_plot <- ggplot(anova_results, aes(value_Gender)) +
+  geom_histogram(fill = "#56B4E9", alpha = 0.8) +
+  geom_vline(xintercept = c(0.05), linetype = "dashed", color = "red") +
+  ggtitle("sex p-values distribution") +
+  ylab("Count") +
+  xlab("p-values") +
+  theme_bw()
+
+Age_gender_plot <- ggplot(anova_results, aes(`value_Gender:Age`)) +
+  geom_histogram(fill = "#56B4E9", alpha = 0.8) +
+  geom_vline(xintercept = c(0.05), linetype = "dashed", color = "red") +
+  ggtitle("age:sex p-values distribution") +
+  ylab("Count") +
+  xlab("p-values") +
+  theme_bw()
+
+adj_group_plot <- ggplot(anova_results, aes(pvalue_adjusted_Group)) +
+  geom_histogram(fill = "#56B4E9", alpha = 0.8) +
+  geom_vline(xintercept = c(0.05), linetype = "dashed", color = "red") +
+  ggtitle("group q-values distribution") +
+  ylab("Count") +
+  xlab("q-values") +
+  theme_bw()
+
+adj_batch_plot <- ggplot(anova_results, aes(pvalue_adjusted_Batch)) +
+  geom_histogram(fill = "#56B4E9", alpha = 0.8) +
+  geom_vline(xintercept = c(0.05), linetype = "dashed", color = "red") +
+  ggtitle("batch q-values distribution") +
+  ylab("Count") +
+  xlab("q-values") +
+  theme_bw()
+
+adj_Age_plot <- ggplot(anova_results, aes(pvalue_adjusted_Age)) +
+  geom_histogram(fill = "#56B4E9", alpha = 0.8) +
+  geom_vline(xintercept = c(0.05), linetype = "dashed", color = "red") +
+  ggtitle("age q-values distribution") +
+  ylab("Count") +
+  xlab("q-values") +
+  theme_bw()
+
+adj_gender_plot <- ggplot(anova_results, aes(pvalue_adjusted_Gender)) +
+  geom_histogram(fill = "#56B4E9", alpha = 0.8) +
+  geom_vline(xintercept = c(0.05), linetype = "dashed", color = "red") +
+  ggtitle("sex q-values distribution") +
+  ylab("Count") +
+  xlab("q-values") +
+  theme_bw()
+
+adj_Age_gender_plot <- ggplot(anova_results, aes(`pvalue_adjusted_Gender:Age`)) +
+  geom_histogram(fill = "#56B4E9", alpha = 0.8) +
+  geom_vline(xintercept = c(0.05), linetype = "dashed", color = "red") +
+  ggtitle("age:sex q-values distribution") +
+  ylab("Count") +
+  xlab("q-values") +
+  theme_bw()
+
+gridExtra::grid.arrange(group_plot, adj_group_plot, batch_plot, adj_batch_plot, nrow = 2, ncol = 2) 
+
+gridExtra::grid.arrange(Age_plot, adj_Age_plot,gender_plot, adj_gender_plot, nrow = 2, ncol = 2)
+
+```
+
+## Multivariate ANOVA results
+
+```{r anovatables, messAge=FALSE}
+anova_results <- as.data.frame(anova_results)
+anova_results[,-1] <- round(anova_results[,-1],3)
+colnames(anova_results)[2]  <- "p_Plate" 
+colnames(anova_results)[3]  <- "p_Gender" 
+colnames(anova_results)[4] <- "p_Age"
+colnames(anova_results)[5] <- "p_Group"
+colnames(anova_results)[6] <- "p_Gender:Age"
+colnames(anova_results)[7]  <- "q_Plate" 
+colnames(anova_results)[8]  <- "q_Gender" 
+colnames(anova_results)[9] <- "q_Age"
+colnames(anova_results)[10] <- "q_Group"
+colnames(anova_results)[11] <- "q_Gender:Age"
+DT::datatable(anova_results)
+```
+
+
+## Data adjustment
+
+Here we are going to perform a data adjustment process across multiple
+variables in a dataset, by calculating predictions based on these models
+and subtracts certain predicted effects (likely the main effects of the
+predictors) from the original data. The process involves linear
+regression modeling and selective removal of predictor influences from
+multiple variables. The process removes the influence of these predictor
+variables from each of the analyzed columns, which could be interpreted
+as a form of batch correction or covariate adjustment. This technique is
+often used to account for known sources of variation and isolate the
+effects of interest.
+
+The input dataset, referred to as data2, contains multiple columns
+including:
+
+-   Plate
+-   Gender
+-   Age
+-   Cohort
+-   Various measurement variables (from column 8 onwards)
+
+Purpose and Implications
+
+-   This process likely serves as a form of batch correction or
+    covariate adjustment.
+-   It aims to remove the effects of Plate, Gender, Age, and Cohort from
+    each measurement variable.
+-   The adjustment may help isolate effects of interest by accounting
+    for known sources of variation.
+    
+### Refining the Adjustment Model
+
+Check p-values from ANOVA (test_wide)
+
+```{r}
+significant_covariates = test_wide[, lapply(.SD, function(x)
+  sum(x < 0.05, na.rm = TRUE)), .SDcols = patterns("pvalue_adjusted")]
+print(significant_covariates)
+```
+
+Adjust the Linear Model Based on ANOVA
+
+```{r adjusteddata}
+data0_1 = data2[,1:7]
+
+for (i in 8:ncol(data2)) {
+  model = lm(data2[, i] ~ data2$Plate + data2$Gender * data2$Age + data2$Allgr)
+  coeff = as.matrix(coef(summary(model), keep.rownames = "coefficient"))
+  pred = stats::predict(model, data2, type = "terms")
+  data0_1 = cbind(data0_1, data2[, i] - (pred[, 1] + pred[, 2] + pred[, 3] + 
+                                           pred[, 5]))
+}
+colnames(data0_1)[8:ncol(data0_1)] = colnames(data2)[8:ncol(data0_1)]
+
+write.csv(data0_1,"03_EffectsAdjusted.csv",row.names = F)
+```
+
+## PCA after adjustment
+
+```{r afeter_effect_removal_by_ml}
+biomarkers <- data0_1[, 8:ncol(data0_1)]
+coul = rainbow(59)
+acp = FactoMineR::PCA(biomarkers)
+plot(
+  as.numeric(acp$ind$coord[, 1]), as.numeric(acp$ind$coord[, 2]),
+  col = coul[as.factor(data0_1$Plate)],
+  main = "Representation of sample after batch effect correction",
+  xlab = paste("Dim1: ", round(acp$eig[1, 2], 2), "%", sep = ""),
+  ylab = paste("Dim2: ", round(acp$eig[2, 2], 2), "%", sep = ""), pch = 16)
+abline(v = 0, h = 0, lty = 3)
+legend("topright",legend = levels(as.factor(data0_1$Plate)), pch = 16, col = coul, 
+       bty = 'n',  # No box around the legend
+       title = "Plate", 
+       cex = 0.5,  # Adjust text size
+       xpd = TRUE,  # Allow legend to go outside plot area if needed
+       inset = c(-0.17, -0.1)  # Adjust the legend's position to the right
+)
+```
+```{r 3dpca_rgl, eval=TRUE, include=FALSE, fig.width=6, fig.height=5, fig.align='center', out.width='100%'}
+first_two_components <- data.frame(
+  PC1 = as.numeric(acp$ind$coord[, 1]), 
+  PC2 = as.numeric(acp$ind$coord[, 2]), 
+  Group = data0_1$Allgr,
+  Sex = data0_1$Gender)
+
+coul = rainbow(3)
+colors <- coul[as.factor(first_two_components$Group |> unique())]
+
+shapes <- c(15, 16)
+
+pca_plot2d <- ggplot(first_two_components, aes(x = PC1, y = PC2, color = Group 
+                                 # ,shape = Sex
+                                 )) +
+    geom_point(alpha = 0.8, size = 3, 
+               # shape = shapes[as.numeric(first_two_components$Gender)],
+               show.legend = TRUE) +
+    # labs(title = "Metabolomics data projected onto the first 2 Principal Components") +
+    scale_color_manual(values = colors) +
+    scale_shape_manual(values = shapes) +
+    theme_classic() + ylim(-20, 20) + xlim(-25, 25) +
+    ylab(label =  paste("PC1: ", round(acp$eig[1, 2], 2), "%", sep = "")) + 
+    xlab(label =  paste("PC2: ", round(acp$eig[2, 2], 2), "%", sep = "")) +
+    theme(plot.title = element_text(hjust = 0.5, vjust = 0.9),
+          legend.position = c(0.9, 0.8),
+          legend.spacing.y = unit(0.2, 'cm'),
+          axis.text = element_text(size = 12),
+          axis.title = element_text(size = 13),
+          legend.background =
+              element_rect(fill = "seashell", size = 0.5,
+                           linetype = "solid", colour = "lightblue3"),
+          legend.title = element_text(size = 11),
+          legend.text = element_text(size = 10)
+          ) 
+
+pca_summary <- acp$eig |> data.frame() |>
+  dplyr::slice_head(n = 4) |>
+  dplyr::rename("CumulativeExplainedVariance" =
+                  "cumulative.percentage.of.variance",
+                "ExplainedVariance" = "percentage.of.variance") |>
+  dplyr::mutate("Component" = acp$eig |> data.frame() |>
+                  dplyr::slice_head(n = 4) |> rownames()) |>
+  dplyr::mutate(across('Component', stringr::str_replace, 'comp ', ''))
+
+explained_variance_plot <- ggplot(pca_summary, aes(x = Component)) +
+  geom_bar(aes(y = ExplainedVariance, fill = "Explained Variance"), 
+           stat = "identity", color = "black") +
+  geom_text(aes(y = ExplainedVariance, 
+                label = ifelse(Component != 1, paste0(round(ExplainedVariance, 2), "%"), "")), 
+            vjust = -0.5, size = 5, color = "#000000") +
+  geom_line(aes(y = CumulativeExplainedVariance), color = "orange", size = 1, group = 1) +
+  geom_point(aes(y = CumulativeExplainedVariance, color = "Cumulative Explained Variance"), size = 3) +
+  geom_text(aes(y = CumulativeExplainedVariance, 
+                label = paste0(round(CumulativeExplainedVariance, 2), "%")),
+            vjust = -0.5, size = 5, color = "#000000") +
+  scale_y_continuous(name = "Explained Variance (%)", limits = c(0, 101)) +
+  labs(x = "Principal Component", fill = "Legend", color = "Legend") +
+  scale_fill_manual(values = c("Explained Variance" = "steelblue")) +
+  scale_color_manual(values = c("Cumulative Explained Variance" = "orange4")) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 12),
+        axis.title = element_text(size = 13),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 11),
+        legend.position = c(0.52, 0.88),
+        legend.spacing.y = unit(0.01, 'cm'), 
+        legend.justification = c(0, 1),  
+        legend.direction = "vertical") 
+
+print(combined_plot)
+
+
+# grid.arrange(
+#   pca_plot2d,
+#   plot_explained_variance,
+#   plot_cumulative_explained_variance, 
+#   ncol = 3,  nrow = 1,
+#   top = textGrob("PCA Variance Explained", 
+#                  gp = gpar(fontsize = 13, col = "black"))
+# )
+pca_results <- gridExtra::arrangeGrob(pca_plot2d, explained_variance_plot, ncol = 2)
+
+pca_results1 <- ggpubr::as_ggplot(pca_results) +                                
+    cowplot::draw_plot_label(label = c("A", "B"), size = 20,
+                    x = c(0.06, 0.57), y = c(1, 1))   
+
+ggsave("pictures/PCA with Variance Explained.tiff", pca_results1, 
+       width = 13, height = 6, device = 'tiff', dpi = 1200)
+pca_results1
+```
+
+# Comparison of AD vs CN
+
+## Volcano plot for p values
+
+Student t test the p-values and the q-values FC distributions are
+displayed below.
+
+```{r, messAge=FALSE}
+CN = data0_1[which(data0_1$Allgr == "CN"), ]
+AD = data0_1[which(data0_1$Allgr == "AD"), ]
+n = ncol(CN)
+dat = rbind(CN, AD)
+test = ADNIMetabo::student_fdr(8, n, AD, CN, F, 2, "AD vs CN")
+FC <- as.numeric(test[, 8])
+Pvalue <- as.numeric(test[, 6])
+threshold = 1.25
+logFC <- log2(FC)
+wh <- which(Pvalue == 0)
+Pvalue[wh] <- 0.000001
+logpval <- -log10(Pvalue)
+res <- data.frame(cbind(logFC, logpval))
+  
+with(res, plot(logFC, logpval, pch = 20, ylab = "p_value (in -log10)", 
+               xlab = "Fold change (in log2)"),cex.axis = 3,cex.lab = 3)
+with(subset(res, logpval < -log10(0.05) ), 
+     points(logFC, logpval, pch = 20, col = "black"))
+with(subset(res, logFC > log2(1) & logpval > -log10(0.05)), 
+     points(logFC,  logpval, pch = 20, col = "lightcoral"))
+with(subset(res, logFC < log2(1) & logpval > -log10(0.05)), 
+     points(logFC,  logpval, pch = 20, col = "lightblue"))
+with(subset(res, logFC > log2(threshold) & logpval > -log10(0.05)), 
+     points(logFC,  logpval, pch = 20, col = "red"))
+with(subset(res, logFC < log2(1/threshold) & logpval > -log10(0.05)), 
+     points(logFC,  logpval, pch = 20, col = "blue"))
+with(subset(res, logpval < -log10(0.05) & abs(logFC) > log2(threshold)), 
+     points(logFC, logpval, pch = 20, col = "gray"))
+
+abline(h = -log10(0.05), col = "red", lwd = 3)
+abline(v = log2(1/threshold), col = "grey", lty = 2)
+abline(v = log2(threshold), col = "grey", lty = 2)
+UP <- nrow(subset(res, logFC > log2(threshold) & logpval > -log10(0.05)))
+DO <- nrow(subset(res, logFC < log2(1/threshold) & logpval > -log10(0.05)))
+legend("topleft", legend = c(parse(text = sprintf("Upregulated : %s",UP)), 
+                           parse(text = sprintf("Downregulated : %s",DO))),
+       col = c("red", "blue"), pch = 16, cex = 0.8)
+```
+
+I chose the FC threshold of a 25% change is often large enough to reflect real biological shifts, especially in metabolic pathways. This is a moderate and commonly accepted threshold in metabolomics, especially when we want to balance sensitivity and specificity. 
+It captures more hits while still avoiding tiny, likely insignificant changes; which is good for pathway enrichment. 
+
+#### Significant variables
+
+According to the selection criteria mentioned above, **`r UP`**
+variables are significantly up and **`r DO`** variables are
+significantly down.
+
+## Volcano plot for q values
+
+```{r}
+FC <- as.numeric(test[, "foldchange"])
+Pvalue <- as.numeric(test[, "pvalue adjusted"])
+threshold = 1.25
+logFC <- log2(FC)
+wh <- which(Pvalue == 0)
+Pvalue[wh] <- 0.000001
+logpval <- -log10(Pvalue)
+res <- data.frame(cbind(logFC, logpval))
+  
+with(res, plot(logFC, logpval, pch = 20, ylab = "p_value (in -log10)", 
+               xlab = "Fold change (in log2)"),cex.axis = 3,cex.lab = 3)
+with(subset(res, logpval < -log10(0.05) ), 
+     points(logFC, logpval, pch = 20, col = "black"))
+with(subset(res, logFC > log2(1) & logpval > -log10(0.05)), 
+     points(logFC,  logpval, pch = 20, col = "lightcoral"))
+with(subset(res, logFC < log2(1) & logpval > -log10(0.05)), 
+     points(logFC,  logpval, pch = 20, col = "lightblue"))
+with(subset(res, logFC > log2(threshold) & logpval > -log10(0.05)), 
+     points(logFC,  logpval, pch = 20, col = "red"))
+with(subset(res, logFC < log2(1/threshold) & logpval > -log10(0.05)), 
+     points(logFC,  logpval, pch = 20, col = "blue"))
+with(subset(res, logpval < -log10(0.05) & abs(logFC) > log2(threshold)), 
+     points(logFC, logpval, pch = 20, col = "gray"))
+
+abline(h = -log10(0.05), col = "red", lwd = 3)
+abline(v = log2(1/threshold), col = "grey", lty = 2)
+abline(v = log2(threshold), col = "grey", lty = 2)
+UP <- nrow(subset(res, logFC > log2(threshold) & logpval > -log10(0.05)))
+DO <- nrow(subset(res, logFC < log2(1/threshold) & logpval > -log10(0.05)))
+legend("topleft", legend = c(parse(text = sprintf("Upregulated : %s",UP)), 
+                           parse(text = sprintf("Downregulated : %s",DO))),
+       col = c("red", "blue"), pch = 16, cex = 0.8)
+```
+
+
+```{r}
+plot_volcano <- function(data, foldchange_col = "foldchange", 
+                         pvalue_col = "pvalue", 
+                         threshold_fc = 1.5, threshold_pval = 0.05, 
+                         y_label = '-log10(P-value)',
+                         annotation_label = "A)", title = "AD vs CN") {
+  
+  FC <- as.numeric(data[, foldchange_col])
+  Pvalue <- as.numeric(data[, pvalue_col])
+  Pvalue[Pvalue == 0] <- 0.000001
+  logFC <- log2(FC)
+  logpval <- -log10(Pvalue)
+  res <- data.frame(
+    logFC = logFC,
+    logpval = logpval,
+    Biomarker = data[, "variable"]
+  )
+  res$Color <- "grey"
+  res$Color[res$logFC > log2(threshold_fc) & res$logpval > -log10(threshold_pval)] <- "red"
+  res$Color[res$logFC < -log2(threshold_fc) & res$logpval > -log10(threshold_pval)] <- "blue"
+  res$Color[res$logpval <= -log10(threshold_pval)] <- "black"
+
+  res$label <- ifelse(res$logFC > log2(threshold_fc) & res$logpval > -log10(threshold_pval) | 
+                        res$logFC < -log2(threshold_fc) & res$logpval > -log10(threshold_pval), 
+                      res$Biomarker, NA)
+  
+  ggplot(res, aes(x = logFC, y = logpval, label = label, color = Color)) +
+    geom_point(size = 3, alpha = 0.6) +
+    scale_color_manual(values = c("grey" = "grey", "red" = "red", "blue" = "blue", "black" = "black")) +
+    ggrepel::geom_text_repel(aes(color = Color), size = 4.5, box.padding = 0.6, 
+                     alpha = 10) +
+    labs(x = 'Fold Change (log2)', y = y_label, title = title) +
+    cowplot::theme_cowplot() +
+    theme(legend.position = 'none', plot.title = element_text(hjust = 0.5, size = 18, 
+                                                              vjust = 1.5)) +
+    geom_hline(yintercept = -log10(threshold_pval), linetype = "dashed", color = "gray") +
+    geom_vline(xintercept = log2(threshold_fc), linetype = "dashed", color = "gray") +
+    geom_vline(xintercept = -log2(threshold_fc), linetype = "dashed", color = "gray") +
+    ylim(c(0, 3)) + 
+    annotate("text", y = 3, x = -1.7, label = annotation_label, size = 7, 
+             fontface = "bold", angle = 0, color = "black") -> pv_volcano
+  
+  return(pv_volcano)
+}
+
+test1 <- test
+plot_volcano(test1, foldchange_col = "foldchange", pvalue_col = "pvalue",
+             threshold_fc = 1.25, threshold_pval = 0.05, annotation_label = "A)",
+             y_label = '-log10(P-value)',
+             title = "AD vs CN") -> pv_volcano
+
+plot_volcano(test1, foldchange_col = "foldchange", pvalue_col = "pvalue adjusted",
+             threshold_fc = 1.25, threshold_pval = 0.05, annotation_label = "B)",
+             y_label = '-log10(P-value adjusted)',
+             title = "AD vs CN") -> qv_volcano
+
+ggsave("pictures/volcano_plots.png", 
+       gridExtra::arrangeGrob(pv_volcano, qv_volcano, ncol = 2), 
+       width = 16, height = 8, dpi = 300)
+```
+
+#### Significant variables
+
+According to the selection criteria mentioned above, **`r UP`**
+variables are significantly up and **`r DO`** variables are
+significantly down.
+
+## AUC and Fold changes for each Biomarker
+
+```{r aucfoldchangetable3}
+CN <- data0_1[which(data0_1$Allgr == "CN"), ]
+AD = data0_1[which(data0_1$Allgr == "AD"), ]
+n = ncol(CN)
+dat = rbind(CN, AD)
+dataX = as.matrix(dat[, 8:n])
+dataY = as.factor(dat$Allgr)
+n = ncol(dataX)
+AUC <- ADNIMetabo::AUC_indiv(dataX, dataY, n, "AD vs CN")
+AUC <- as.data.frame(AUC)
+AUC$auc <- as.numeric(AUC$auc)
+n <- length(AUC$auc)
+for (i in seq_len(nrow(AUC))) {
+  if (AUC[i, 2] < 0.50) {
+    AUC[i, 2] <- 1 - AUC[i, 2]
+  }
+}
+test <- as.data.frame(test)
+test <- test |> 
+    dplyr::rename(biomarker = variable, 
+         CN_Mean = "mean group2", CN_SD = "sd group2", 
+         AD_Mean = "mean group1", AD_SD = "sd group1", 
+         pvalues = pvalue, foldchange = foldchange, 
+         qvalues = "pvalue adjusted") |>
+    dplyr::select_if(~sum(!is.na(.)) > 0)
+final <- merge(AUC, test, by = "biomarker", all = FALSE )
+final <- data.frame(final)
+final$auc = as.numeric(final$auc)
+final$AD_Mean = as.numeric(final$AD_Mean)
+final$AD_SD = as.numeric(final$AD_SD)
+final$CN_Mean = as.numeric(final$CN_Mean)
+final$CN_SD = as.numeric(final$CN_SD)
+final$pvalues = as.numeric(final$pvalues)
+final$foldchange = as.numeric(final$foldchange)
+final$qvalues = as.numeric(final$qvalues)
+final[, -1] <- round(final[, -1] |> sapply(as.numeric), 3)
+DT::datatable(final)
+write.csv(final, "finaltableADvsCN.csv", row.names = F)
+```
+
+## List of significant biomarker after gender and Age effects adjusted
+
+```{r}
+b1 = as.data.frame(final[which(final$auc > 0.60), 1])
+b1 = as.character(b1[, 1])
+b1
+newdata = data0_1[, c(1:7)]
+c = colnames(data0_1)
+for (j in 1:length(b1)) {
+  newdata = cbind(newdata, data0_1[, which(c == b1[j])])
+}
+colnames(newdata)[-c(1:7)] = b1
+data2 = as.data.frame(newdata)
+significantadjbiomarkers <- data2[, -c(1:7)]
+```
+
+## Correlations of Significant Biomarkers
+
+```{r, fig.dim = c(8, 8)}
+if (ncol(significantadjbiomarkers) > 0) {
+  correlations <- cor(as.matrix(significantadjbiomarkers), 
+                      use = "pairwise.complete.obs")
+  corrplot::corrplot(
+    correlations, method = "square", order = "hclust", number.font = 5,
+    main = "Correlations between significant biomarkers ",
+    tl.cex = 0.5, mar = c(0, 0, 3, 0), tl.col = 1
+  )
+}
+```
+
+
+## Boxplot for significant Biomarkers for Age, gender adjusted data
+
+```{r, fig.dim = c(8, 8)}
+if (ncol(significantadjbiomarkers) > 0) {
+  data2 <- as.data.frame(data2)
+  sigbiomarkersadj <- colnames(data2)[8:length(data2)]
+  metadata <- c("Gender", "Allgr", "APOE4", "Age")
+  
+  long_datasetsig <- melt(
+    data2, id.vars = c('RID' , metadata), variable.name = "ASSAY", 
+    value.name = "value", measure.vars = sigbiomarkersadj
+  )
+  
+  long_datasetsig <- subset(long_datasetsig, Cohort != "HC")
+  
+  ggplot(long_datasetsig, aes(x = Cohort, col = Cohort, y = value)) +
+    theme_minimal() +
+    geom_boxplot() + facet_wrap(ASSAY ~ ., scales = "free") + 
+    scale_color_discrete(guide = F) + 
+    ggtitle("Biomarker values with significant group effect") +
+    theme(strip.text = element_text(size = rel(0.6)))
+}
+```
