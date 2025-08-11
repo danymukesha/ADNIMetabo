@@ -15,7 +15,7 @@ their respective LOD values. Must include columns:
 \itemize{
 \item \verb{Analyte (short name)}: Short names of analytes matching
 the column names in \code{raw_data}.
-\item \code{LOD (µM)}: The limit of detection for each analyte.
+\item \verb{LOD (µM)}: The limit of detection for each analyte.
 }}
 
 \item{inj_type}{is the injection type. e.g.: FIA or UPLC.

@@ -1,9 +1,9 @@
 ## code to prepare `lasso_varimpAD vs CN` dataset goes here
-#######Modelling for AD vs CN
+####### Modelling for AD vs CN
 library(caret)
 library(readr)
 data3_1 <- read_csv("./vignettes/03_EffectsAdjusted.csv")
-data3_1 = as.data.frame(data3_1)##data involving only significant biomarkers based on q values of group
+data3_1 <- as.data.frame(data3_1) ## data involving only significant biomarkers based on q values of group
 
 CN <- data3_1[which(data3_1$Allgr == "CN"), ]
 AD <- data3_1[which(data3_1$Allgr == "AD"), ]
@@ -60,13 +60,15 @@ library(doParallel)
 cores <- detectCores() - 5
 cl <- makeCluster(cores)
 registerDoParallel(cl)
-lasso_grid <- train(x = dat[,c(8:n)],
-                    y = dat$Allgr,
-                    method = "glmnet",
-                    metric = "ROC",
-                    trControl = control,
-                    tuneLength = 40,
-                    preProcess = c("zv", "center", "scale", "medianImpute"))
+lasso_grid <- train(
+    x = dat[, c(8:n)],
+    y = dat$Allgr,
+    method = "glmnet",
+    metric = "ROC",
+    trControl = control,
+    tuneLength = 40,
+    preProcess = c("zv", "center", "scale", "medianImpute")
+)
 
 stopCluster(cl)
 # unregister_dopar()
@@ -78,8 +80,9 @@ dir.create(paste0(getwd(), "/export/lasso_models"))
 
 lasso_funcs <- getModelInfo("glmnet", regex = FALSE)[[1]]
 
-lasso_funcs$fit <- eval(str2lang(sub("(.*?)\\{(.*)",
-                                     '\\1 {
+lasso_funcs$fit <- eval(str2lang(sub(
+    "(.*?)\\{(.*)",
+    '\\1 {
     on.exit({
       if (!last) {
         saveRDS(out,
@@ -88,19 +91,22 @@ lasso_funcs$fit <- eval(str2lang(sub("(.*?)\\{(.*)",
           compress = F)
       }
     }, add = T)
-    \\2', deparse1(lasso_funcs$fit, collapse = "\n"))))
+    \\2', deparse1(lasso_funcs$fit, collapse = "\n")
+)))
 
 n <- ncol(dat)
 cores <- detectCores() - 5
 cl <- makeCluster(cores)
 registerDoParallel(cl)
-lasso <- train(x = dat[,c(8:ncol(dat))],
-               y = dat$Allgr,
-               method = lasso_funcs, tuneGrid = lasso_grid$bestTune,
-               metric = "ROC",
-               tuneLength = 1,
-               trControl = control,
-               preProcess = c("zv", "center", "scale", "medianImpute"))
+lasso <- train(
+    x = dat[, c(8:ncol(dat))],
+    y = dat$Allgr,
+    method = lasso_funcs, tuneGrid = lasso_grid$bestTune,
+    metric = "ROC",
+    tuneLength = 1,
+    trControl = control,
+    preProcess = c("zv", "center", "scale", "medianImpute")
+)
 stopCluster(cl)
 
 cv_models <- list.files("export/lasso_models/", full.names = T)
@@ -109,19 +115,39 @@ cv_models <- list.files("export/lasso_models/", full.names = T)
 # }
 
 n <- length(cv_models)
-lasso_varimp <- colnames(CN)[8:ncol(CN)]
+# lasso_varimp <- colnames(CN)[8:ncol(CN)]
+# for (i in 1:n) {
+#     my_lasso <- readRDS(cv_models[[i]])
+#     lasso_varimp <- cbind(lasso_varimp,varImp(my_lasso))
+# }
+
+varimp_list <- list()
+
 for (i in 1:n) {
     my_lasso <- readRDS(cv_models[[i]])
-    lasso_varimp <- cbind(lasso_varimp,varImp(my_lasso))
+    lasso_imp_df <- varImp(my_lasso) %>%
+        as.data.frame() %>%
+        rownames_to_column(var = "variable") %>%
+        rename(!!paste0("Model_", i) := Overall)
+
+    varimp_list[[i]] <- lasso_imp_df
 }
 
-varimp_binary <- apply(lasso_varimp[,-1], 2, function(x) ifelse(x > 0, 1, 0))
+# Merge all importance data frames by variable name
+lasso_varimp <- purrr::reduce(varimp_list, full_join, by = "variable")
+
+
+varimp_binary <- apply(lasso_varimp[, -1], 2, function(x) ifelse(x > 0, 1, 0))
 lasso_VIS_ADvsCN <- NULL
-lasso_VIS_ADvsCN <- cbind(lasso_VIS_ADvsCN,
-                          cbind(Metabolites = lasso_varimp[,1],
-                                mean_VIS = rowMeans(lasso_varimp[,-1]),
-                                numberoftimes = rowSums(varimp_binary)))
-write.csv(lasso_VIS_ADvsCN,"lasso_varimpAD vs CN.csv",row.names = F)
+lasso_VIS_ADvsCN <- cbind(
+    lasso_VIS_ADvsCN,
+    cbind(
+        Metabolites = lasso_varimp[, 1],
+        mean_VIS = rowMeans(lasso_varimp[, -1]),
+        numberoftimes = rowSums(varimp_binary)
+    )
+)
+write.csv(lasso_VIS_ADvsCN, "lasso_varimpAD vs CN.csv", row.names = F)
 
 usethis::use_data(lasso_VIS_ADvsCN, overwrite = TRUE)
 
@@ -135,9 +161,19 @@ coef_df <- coef_df[coef_df$Coefficient != 0 & coef_df$Feature != "(Intercept)", 
 
 top_features <- coef_df[order(abs(coef_df$Coefficient), decreasing = TRUE), ][1:50, ]
 
-ggplot(top_features, aes(x = reorder(Feature, abs(Coefficient)), y = Coefficient)) +
-    geom_bar(stat = "identity", fill = "steelblue") +
+ggplot(top_features, aes(
+    x = reorder(Feature, abs(Coefficient)),
+    y = Coefficient, fill = Coefficient > 0
+)) +
     coord_flip() +
-    labs(title = "Top 50 LASSO features (AD vs CN)",
-         x = "Features", y = "Coefficient Value")
+    geom_bar(stat = "identity", show.legend = FALSE) +
+    scale_fill_manual(values = c("#D55E00", "#0072B2")) +
+    labs(
+        title = "Top 50 LASSO features (AD vs CN)",
+        subtitle = "Ranked by absolute coefficient magnitude",
+        x = "Metabolites features", y = "Coefficient value",
+        panel.grid.major.y = element_blank()
+    ) +
+    theme_hc()
 
+ggsave("top50_lasso_features_ADvsCN.png", width = 6, height = 7.5, dpi = 300)

@@ -1,0 +1,1061 @@
+---
+title: "Additional file 1: Supplementary Material and Methods"
+author: "Dany Mukesha, Guillaume Sacco"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    self_contained: true
+    code_folding: hide
+  pdf_document:
+    toc: true
+  word_document:
+    toc: true
+editor_options:
+  markdown:
+    wrap: 72
+abstract: |
+  This supplementary material details the computational methodology used
+  to develop and evaluate machine learning models for distinguishing
+  Alzheimer’s disease (AD) from healthy controls (CN) using serum
+  metabolite data from the ADNI cohort. The analysis leverages 630
+  metabolites, reduced to 196 via LASSO featureselection, and further
+  refined to the top 151, with evaluations conducted both with and without
+  the *APOE* genotype. The workflow includes data preprocessing, dataset
+  partitioning, model training with hyperparameter tuning, performance
+  evaluation, and model refinement. All analyses were performed using R
+  (version 4.3.2) with relevant packages for statistical modeling and
+  visualization.
+---
+
+# Software and Environment Setup
+
+The analysis was conducted in R, utilizing packages for data
+manipulation, machine learning, and visualization. A fixed seed
+(set.seed(123)) ensured reproducibility. The following R packages were
+used: tidyverse for data manipulation, caret for model training, glmnet
+for LASSO regression, randomForest for random forest models, naive_bayes
+for Naïve Bayes, pls for partial least squares, xgbTree for XGBoost,
+pROC and precrec for performance metrics, and ggplot2 for visualization.
+Parallel processing was enabled using doParallel to optimize
+computational efficiency.
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+library(tidyverse)
+library(tidyr)
+library(caret)
+library(glmnet)
+library(pROC)
+library(randomForest)
+library(doParallel)
+library(data.table)
+library(precrec)
+library(gridExtra)
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(reshape2)
+library(RColorBrewer)
+library(viridis)
+
+library(forcats)
+library(patchwork)
+
+library(DT)
+source("../R/unregister_dopar.R")
+unregister_dopar <- function() {
+    env <- foreach:::.foreachGlobals
+    rm(list = ls(name = env), pos = env)
+}
+set.seed(123)
+```
+
+# Data Loading and Preprocessing
+
+The dataset, comprising 630 serum metabolites and clinical data
+(including APOE genotype), was loaded from a CSV file
+(03_EffectsAdjusted.csv). After the data pre-processing processing,
+where metabolites with high number of missing values and values below
+the limit of detection (LOD) were removed, the dataset remained with 594
+metabolites in total. Metabolite names were standardized. LASSO feature
+selection, based on variable importance from prior analyses, reduced the
+feature set to 196 metabolites selected based on a threshold of at least
+70 appearances in LASSO iterations and sorted by mean variable
+importance score. The processed dataset was saved as
+onlyselectedADvsCN.csv for subsequent analyses.
+
+```{r loading_data}
+here::dr_here()
+data <- read_csv("03_EffectsAdjusted.csv") |> as.data.frame()
+colnames(data) <- sapply(colnames(data), ADNIMetabo::transform_colnames, USE.NAMES = FALSE)
+ 
+final <- read_csv("../lasso_varimpAD vs CN.csv")
+selected_features <- final |> filter(numberoftimes >= 70) |>
+    dplyr::arrange(desc(numberoftimes), desc(mean_VIS)) |>
+    pull(1) |> as.character() 
+
+newdata <- data |> dplyr::select(1:7)
+for (biomarker in selected_features) {
+    newdata <- cbind(newdata, data[[biomarker]])
+}
+colnames(newdata)[8:ncol(newdata)] <- selected_features
+data0 <- as.data.frame(newdata)
+
+write.csv(data0, "onlyselectedADvsCN.csv", row.names = FALSE)
+data0 |> dplyr::select(1:10) |> dplyr::glimpse()
+```
+
+# Dataset Partitioning
+
+The dataset was split into training (70%) and test (30%) sets using
+stratified sampling to maintain the proportion of AD and CN cases. This
+ensured balanced representation of both classes in each subset. The
+Allgr column, indicating AD or CN status, was converted to a factor for
+classification tasks. Partition the dataset into 70% training and 30%
+test sets using stratified sampling (AD vs CN).
+
+```{r partitioning}
+set.seed(123)
+CN <- data0 |> filter(Allgr == "CN")
+AD <- data0 |> filter(Allgr == "AD")
+
+train_nCN <- sample(nrow(CN), nrow(CN) * 0.7)
+train_nAD <- sample(nrow(AD), nrow(AD) * 0.7)
+
+train_CN <- CN[train_nCN, ]
+train_AD <- AD[train_nAD, ]
+train <- rbind(train_CN, train_AD)
+
+test_CN <- CN[-train_nCN, ]
+test_AD <- AD[-train_nAD, ]
+test <- rbind(test_CN, test_AD)
+
+train$Allgr <- as.factor(train$Allgr)
+test$Allgr <- as.factor(test$Allgr)
+```
+
+# Model Training
+
+Five machine learning classifiers; LASSO, Random Forest, Naïve Bayes,
+Partial Least Squares (PLS), and XGBoost; were trained on the selected
+features using the caret package. Hyperparameter tuning was performed
+via repeated 5-fold cross-validation (20 repeats) with the area under
+the receiver operating characteristic curve (ROC AUC) as the
+optimization metric. Preprocessing steps included zero-variance
+filtering, centering, scaling, and median imputation. Models were either
+trained or loaded from saved files to optimize computational efficiency.
+Parallel processing was employed to reduce training time.Train five
+classifiers on the training set with selected features, using repeated
+stratified 5-fold cross-validation (20 repeats) for hyperparameter
+tuning.
+
+```{r model_training, warning=FALSE, message=FALSE}
+set.seed(123)
+n_cv <- 5
+n_repeat <- 20
+n_param_max <- 500
+my_folds <- createMultiFolds(train$Allgr, k = n_cv, times = n_repeat)
+seeds <- list()
+
+for (i in seq_len(n_cv * n_repeat)) {
+    seeds[[i]] <- sample.int(n = 1000, n_param_max)
+}
+seeds[[n_cv * n_repeat + 1]] <- sample.int(1000, 1)
+
+control <- trainControl("repeatedcv",
+    index = my_folds,
+    selectionFunction = "best",
+    classProbs = TRUE, savePredictions = "final", 
+    summaryFunction = twoClassSummary, seeds = seeds
+)
+
+model_dir <- "saved_models"
+if (!dir.exists(model_dir)) {
+    dir.create(model_dir)
+}
+
+train_or_load <- function(model_name, train_func) {
+    model_file <- file.path(model_dir, paste0(model_name, ".rds"))
+    
+    if (file.exists(model_file)) {
+        cat("Loading saved", model_name, "model...\n")
+        readRDS(model_file)
+    } else {
+        cl <- makeCluster(detectCores() - 5)
+        registerDoParallel(cl)
+        
+        cat("Training", model_name, "model...\n")
+        model <- train_func()
+        
+        stopCluster(cl)
+        unregister_dopar()
+        
+        saveRDS(model, model_file)
+        model
+    }
+}
+
+models <- list()
+models$lasso <- train_or_load("lasso", function() {
+    train(
+        x = train[, selected_features], y = train$Allgr, method = "glmnet", metric = "ROC",
+        trControl = control, preProcess = c("zv", "center", "scale", "medianImpute"))
+})
+
+models$rf <- train_or_load("rf", function() {
+    train(
+        x = train[, selected_features], y = train$Allgr, method = "rf", metric = "ROC",
+        trControl = control, preProcess = c("zv", "center", "scale", "medianImpute"))
+})
+
+models$nb <- train_or_load("nb", function() {
+    train(
+        x = train[, selected_features], y = train$Allgr, method = "naive_bayes", metric = "ROC", 
+        trControl = control, preProcess = c("zv", "center", "scale", "medianImpute"))
+})
+
+models$pls <- train_or_load("pls", function() {
+    train(
+        x = train[, selected_features], y = train$Allgr, method = "pls", metric = "ROC", 
+        trControl = control, preProcess = c("zv", "center", "scale", "medianImpute"))
+})
+
+models$xgb <- train_or_load("xgb", function() {
+    train(
+        x = train[, selected_features], y = train$Allgr, method = "xgbTree", metric = "ROC",
+        trControl = control, preProcess = c("zv", "center", "scale", "medianImpute"), 
+        verbosity = 0)
+})
+```
+
+# Model Evaluation
+
+Model performance was assessed using ROC and precision-recall curves
+(PRC) on the training set, with confidence intervals computed using the
+precrec package. ROC AUC and AUPRC were calculated, along with the AUPRC
+ratio relative to a baseline. Results were summarized in tables and
+visualized using ROC curves with confidence bands and mean CV AUC plots
+with 95% confidence intervals. All outputs were saved for further
+analysis.
+
+```{r model_pred}
+resample_scores <- rbindlist(lapply(models, `[[`, "pred"), fill = TRUE, idcol = "model")
+resample_scores[, fold_id := paste(model, Resample, sep = "__")]
+score_list <- split(resample_scores$CN, resample_scores$fold_id)
+label_list <- split(resample_scores$obs, resample_scores$fold_id)
+
+model_names <- sub("__.*", "", names(score_list))
+names(model_names) <- names(score_list)
+
+mmdata_all <- mmdata(scores = score_list, 
+                     labels = label_list,
+                     modnames = model_names,
+                     dsids = seq_along(model_names))
+metrics_cv_all <- evalmod(mmdata_all, mode = "rocprc", 
+                          cb_alpha = 0.05, x_bins = 20)
+
+cv_performance <- data.table::dcast(
+    as.data.table(precrec::auc_ci(metrics_cv_all, 
+                                  dtype = "t"))[, .(model = modnames, 
+                                                    curvetypes, mean, 
+                                                    lower_bound, upper_bound)],
+    model ~ curvetypes,
+    value.var = c("mean", "lower_bound", "upper_bound"), sep = "_cv_"
+)
+
+cv_AUPRC <- data.table(attr(metrics_cv_all, "aucs"))[curvetypes == "PRC", 
+                                                     .(model = modnames, 
+                                                       cv_AUPRC = aucs)]
+baseline <- data.table(attr(metrics_cv_all, "data_info"))[, np / (nn + np)]
+cv_AUPRC[, ratio := cv_AUPRC / baseline]
+cv_ratio_mean <- cv_AUPRC[, .(mean_cv_AUPRC_ratio = exp(mean(log(ratio)))), 
+                          by = model]
+cv_performance <- merge(cv_performance, cv_ratio_mean, by = "model", all.x = TRUE)
+
+trapezoid_auc <- 
+  as.data.table(metrics_cv_all)[type == "ROC", 
+                                .(auc = sum(diff(x) * (head(y, -1) + tail(y, -1)) / 2)), 
+                                by = modname]
+cv_performance <- merge(cv_performance, trapezoid_auc, by.x = "model", 
+                        by.y = "modname", all.x = TRUE)
+
+model_labels <- c(lasso = "LASSO", pls = "PLS", rf = "Random Forest", 
+                  xgb = "XGBoost", nb = "Naive Bayes")
+```
+
+## ROC Curves with Confidence Bands
+
+```{r plot_roc_with_ci, fig.width=8, fig.height=6, fig.align='left'}
+plot_data <- merge(as.data.table(metrics_cv_all)[type == "ROC"],
+    cv_performance,
+    by.x = "modname", by.y = "model",
+    all.x = TRUE
+)
+plot_data[, model := factor(
+    paste0(
+        model_labels[modname], " (AUC = ",
+        round(mean_cv_ROC, 3), ")"
+    ),
+    levels = unique(paste0(
+        model_labels[modname],
+        " (AUC = ",
+        round(mean_cv_ROC, 3),
+        ")"
+    ))
+)]
+
+auc_order <- plot_data[order(-auc)]$model
+plot_data[, model := factor(model, levels = unique(auc_order))]
+
+roc_curves_train <- ggplot(plot_data, 
+                           aes(x = x, y = y, color = model, fill = model)) +
+    geom_ribbon(aes(ymin = ymin, ymax = ymax), alpha = 0.2, 
+                show.legend = FALSE) +
+    geom_line(size = 0.9) +
+    geom_abline(lty = 2, size = 0.3) +
+    labs(x = "1 - Specificity", y = "Sensitivity", 
+         title = "ROC Curves on Train Set", 
+         subtitle = "Comparison of ML Models on Training Data",
+         caption = "Repeated CV: 5-fold, 20 repeats") +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        legend.position = c(0.67, 0.2), legend.title = element_blank(),
+        legend.text = element_text(size = 10)) +
+    coord_fixed()
+
+roc_curves_train
+
+ggsave("results/roc_curves_repeated_cv_trainset.png", roc_curves_train, 
+       height = 5.7, width = 6.4, dpi = 700)
+```
+
+## Mean CV AUC with Confidence Intervals
+
+```{r plot_cvand_ci, fig.width=7, fig.height=4, fig.align='left'}
+cv_performance[, model := model_labels[model]]
+ggplot(cv_performance, aes(
+  y = reorder(model, mean_cv_ROC),
+  x = mean_cv_ROC,
+  xmin = lower_bound_cv_ROC,
+  xmax = upper_bound_cv_ROC)) +
+  geom_pointrange() +
+  theme_bw() +
+  xlab("Average CV AUC with 95% Confidence Interval") +
+  ylab("Model") +
+  ggtitle("Model Performances")
+
+```
+
+## Summary Table
+
+```{r save_tb}
+setnames(cv_performance,
+         old = cv_performance |> colnames(),
+         new = c("Model",
+                 "Mean PR AUC",
+                 "Mean ROC AUC",
+                 "Lower PR AUC",
+                 "Lower ROC AUC",
+                 "Upper PR AUC",
+                 "Upper ROC AUC",
+                 "AUPRC Ratio",
+                 "Trapezoidal ROC AUC"))
+
+cv_performance_cleaned <- cv_performance[, lapply(.SD, function(x) if (is.numeric(x)) round(x, 2) else x)]
+
+cv_performance_cleaned |> dplyr::select(-`Trapezoidal ROC AUC`) |>
+    knitr::kable()
+
+fwrite(cv_performance_cleaned, "results/cv_performance_trainset.csv")
+```
+
+# Feature Importance Analysis
+
+Variable importance was calculated for the LASSO and PLS models to
+identify the most influential metabolites. The top 25 metabolites, based
+on LASSO importance scores, were visualized in a bar plot. Metabolite
+names were converted to a standardized format using
+ADDIA4Metabo::convert_metabo_names for clarity.
+
+```{r}
+finalimp <- varImp(models$lasso)$importance |>
+    cbind(varImp(models$pls)$importance) |>
+    add_rownames(var = "Metabolite") |>
+    rename("LASSO" = "Overall...2", "PLS" = "Overall...3")
+
+finalimp_long <- reshape2::melt(finalimp, id.vars = "Metabolite", 
+                                variable.name = "Model", 
+                                value.name = "Importance")
+
+top_biomarkers <- finalimp |>
+    arrange(desc(LASSO)) |>
+    slice_head(n = 25) |>
+    pull(Metabolite)
+filtered_imp <- finalimp_long |> filter(Metabolite %in% top_biomarkers)
+
+filtered_imp$Metabolite <- filtered_imp$Metabolite |> 
+  sapply(ADDIA4Metabo::convert_metabo_names)
+
+combined_plot <- ggplot(filtered_imp %>% filter(Model == "LASSO"), aes(x = Importance, 
+                                          y = reorder(Metabolite, Importance), 
+                                          fill = Model)) +
+    geom_bar(stat = "identity", position = "dodge", width = 0.6) +
+    scale_fill_manual(values = c("steelblue", "darkred")) +  
+    labs(title = "Top 25 Metabolites (LASSO Importance)", 
+         subtitle = "Bar Plot of Metabolite Importance Scores",
+         x = "Importance Score", y = "Metabolite", fill = "Model") +
+    theme(plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+          legend.position = "none")
+
+combined_plot
+ggsave("top_25_metabolites_LASSO_importance.png", combined_plot, height = 5.7, width = 7.8, dpi = 700)
+```
+
+# Refinement with Top \~150 Features
+
+## with LASSO
+
+The LASSO model was retrained using the top \~150 metabolites, selected
+based on variable importance, to assess whether a reduced feature set
+improved performance. The retrained model was evaluated on the test set,
+with ROC curves generated and saved.
+
+```{r top_refine_features_lasso}
+lasso_imp <- varImp(models$lasso)$importance
+top_features <- rownames(lasso_imp)[order(lasso_imp$Overall, 
+                                            decreasing = TRUE)[1:153]]
+set.seed(123)
+lasso_reduced <- train_or_load("lasso_reduced", function() {
+    train(x = train[, top_features], y = train$Allgr, method = "glmnet",
+        metric = "ROC", trControl = control,
+        preProcess = c("zv", "center", "scale", "medianImpute"))
+})
+
+model_labels <- c(model_labels, lasso_reduced = "LASSO without APOE")
+
+top_probs <- predict(lasso_reduced, test[, top_features], type = "prob")[, "AD"]
+
+roc_top <- roc(test$Allgr, top_probs, levels = c("CN", "AD"), 
+                direction = "<") 
+
+p <- ADNIMetabo::plot_and_save_roc(roc_top, "roc_curve_top.png",
+                        line_color =  "blue", ci_auc = TRUE,
+                        width = 6, height = 6, 
+                        title = "ROC Curve for Top Metabolites")
+p
+```
+
+## with PLS
+
+Select the top \~150 metabolites from the best model (PLS) based on
+variable importance and retrain. (quite similar performance as LASSO)
+
+```{r top_refine_features_pls, eval=FALSE}
+pls_imp <- varImp(models$pls)$importance 
+top_features <- rownames(pls_imp)[order(pls_imp$Overall, decreasing = TRUE)[1:153]] 
+
+set.seed(123) 
+pls_reduced <- train_or_load("pls_reduced", function() { 
+    train(x = train[, top_features], y = train$Allgr, method = "glmnet", 
+          metric = "ROC", trControl = control, 
+          preProcess = c("zv", "center", "scale", "medianImpute")) })
+
+model_labels <- c(model_labels, pls_reduced = "PLS without APOE")
+
+top_probs <- predict(pls_reduced, test[, top_features], type = "prob")[, "AD"]
+
+roc_top <- roc(test$Allgr, top_probs, levels = c("CN", "AD"), direction = "<")
+
+p <- ADNIMetabo::plot_and_save_roc(roc_top, "roc_curve_top.png", 
+                                   line_color = "blue", ci_auc = TRUE, 
+                                   width = 6, height = 6, 
+                                   title = "ROC Curve for Top Metabolites") 
+p
+```
+
+# Incorporating APOE Genotype
+
+A model using only the *APOE* genotype was trained to evaluate its
+standalone predictive power. The model was assessed on the test set,
+with ROC curves generated to visualize performance.
+
+```{r apoe_inclusion}
+train$APOE4 <- as.factor(train$APOE4) 
+apoe_dummies <- model.matrix(~ APOE4 - 1, data = train) # one-hot encoding
+colnames(apoe_dummies) <- paste0("APOE4_", levels(train$APOE4))
+
+train_with_apoe <- cbind(train[ , !(names(train) %in% "APOE4")], apoe_dummies)
+
+test$APOE4 <- as.factor(test$APOE4) 
+apoe_dummies <- model.matrix(~ APOE4 - 1, data = test) # one-hot encoding
+colnames(apoe_dummies) <- paste0("APOE4_", levels(test$APOE4))
+
+test_with_apoe <- cbind(test[ , !(names(test) %in% "APOE4")], apoe_dummies)
+
+features_with_apoe <- c(top_features, train_with_apoe |> 
+                            dplyr::select(starts_with("APOE")) |> 
+                            colnames())
+
+set.seed(123)
+model_with_apoe <- train_or_load("model_with_apoe", function() {
+    train(x = train_with_apoe[, features_with_apoe], y = train_with_apoe$Allgr,
+        method = "glmnet", metric = "ROC", trControl = control,
+        preProcess = c("zv", "center", "scale", "medianImpute"))
+})
+
+apoe_probs <- predict(model_with_apoe, test_with_apoe[, features_with_apoe], 
+                      type = "prob")[, "AD"]
+roc_with_apoe <- roc(test_with_apoe$Allgr, apoe_probs, levels = c("CN", "AD"),
+                     direction = "<")
+auc_ci <- ci.auc(roc_with_apoe)
+#plot(roc_with_apoe, col = "blue", main = "ROC Curve with Top 5 Metabolites + APOE")
+p <- ADNIMetabo::plot_and_save_roc(roc_with_apoe, "roc_curve_with_apoe.png",
+                        line_color =  "blue", ci_auc = TRUE,
+                        width = 6, height = 6, 
+                        title = "ROC Curve for Top Metabolites + APOE")
+p
+```
+
+# Exclusively APOE Genotype
+
+A model using only the APOE genotype was trained to evaluate its
+standalone predictive power. The model was assessed on the test set,
+with ROC curves generated to visualize performance.
+
+```{r}
+features_only_apoe <- c("Allgr", train_with_apoe |> 
+                            dplyr::select(starts_with("APOE")) |> 
+                            colnames())
+
+train_only_apoe <- train_with_apoe[, features_only_apoe, drop = FALSE]
+test_only_apoe <- test_with_apoe[, features_only_apoe, drop = FALSE]
+
+set.seed(123)
+model_only_apoe <- train_or_load("model_only_apoe", function() {
+    train(x = train_only_apoe |> dplyr::select(-Allgr), 
+          y = train_only_apoe$Allgr,
+          method = "glmnet", metric = "ROC", trControl = control,
+          preProcess = c("zv", "center", "scale", "medianImpute"))
+})
+
+apoe_only_probs <- predict(model_only_apoe, test_only_apoe |> 
+                               dplyr::select(-Allgr), 
+                           type = "prob")[, "AD"]
+roc_only_apoe <- roc(test_only_apoe$Allgr, apoe_only_probs, levels = c("CN", "AD"), 
+                     direction = "<")
+p <- ADNIMetabo::plot_and_save_roc(roc_only_apoe, "roc_curve_only_apoe.png",
+                       line_color =  "blue", 
+                        width = 6, height = 6, 
+                       title = "ROC Curve for Only APOE")
+p
+```
+
+# Incorporating MMSE Assessment
+
+The Mini-Mental State Examination (MMSE) baseline scores were
+incorporated by joining \texttt{ADNIMetabo::baseline\_clinical\_data}
+with the training and test datasets. The LASSO model was retrained using
+the top \~150 metabolites, APOE genotype, and MMSE scores, and evaluated
+on the test set with ROC curves.
+
+```{r mmse_inclusion}
+train_with_mmse <- train_with_apoe |>
+    left_join(ADNIMetabo::baseline_clinical_data |> unique() |>
+        select(RID, MMSE_bl), by = "RID")
+
+test_with_mmse <- test_with_apoe |>
+    left_join(ADNIMetabo::baseline_clinical_data |> unique() |> 
+        select(RID, MMSE_bl), by = "RID") 
+
+features_with_mmse <- c(top_features, train_with_mmse |> 
+                            dplyr::select(starts_with("APOE"), MMSE_bl) |> 
+                            colnames())
+
+set.seed(123)
+lasso_reduced_withMMSE <- train_or_load("lasso_reduced_withMMSE", function() {
+    train(x = train_with_mmse[, features_with_mmse], y = train_with_mmse$Allgr,
+          method = "glmnet", metric = "ROC", trControl = control,
+          preProcess = c("zv", "center", "scale", "medianImpute"))
+})
+
+mmse_probs <- predict(lasso_reduced_withMMSE, test_with_mmse, type = "prob")[, "AD"]
+roc_with_mmse <- pROC::roc(test_with_mmse$Allgr, mmse_probs, levels = c("CN", "AD"), direction = "<")
+
+auc_ci <- ci.auc(roc_with_mmse)
+p <- ADNIMetabo::plot_and_save_roc(roc_with_mmse, "roc_curve_with_mmse.png",
+                       line_color =  "blue", auc_digits = 2,
+                        width = 6, height = 6, 
+                       title = "ROC Curve with Top ~150 Metabolites + APOE + MMSE")
+p
+```
+
+# Exclusively MMSE
+
+A LASSO model using only MMSE scores was trained to evaluate its
+standalone predictive power. A dummy variable was added to ensure model
+stability. Performance was assessed on the test set with ROC curves.
+
+```{r}
+features_only_mmse <- c("Allgr", train_with_mmse |> 
+                            dplyr::select(starts_with("MMSE")) |> 
+                            colnames())
+
+train_only_mmse <- train_with_mmse[, features_only_mmse, drop = FALSE]
+train_only_mmse$dummy <- rep("", nrow(train_only_mmse))
+test_only_mmse <- test_with_mmse[, features_only_mmse, drop = FALSE]
+test_only_mmse$dummy <- rep("", nrow(test_only_mmse))
+
+set.seed(123)
+model_only_mmse <- train_or_load("model_only_mmse", function() {
+    train(x = train_only_mmse |> dplyr::select(-Allgr), y = train_with_mmse$Allgr,
+          method = "glmnet", metric = "ROC", trControl = control,
+          preProcess = c("zv", "center", "scale", "medianImpute"))
+})
+
+mmse_probs <- predict(model_only_mmse, test_only_mmse, type = "prob")[, "AD"]
+roc_only_mmse <- roc(test_only_apoe$Allgr, mmse_probs, levels = c("CN", "AD"), direction = "<")
+p <- ADNIMetabo::plot_and_save_roc(roc_only_mmse, "roc_curve_only_MMSE.png",
+                       line_color =  "blue", 
+                        width = 6, height = 6, 
+                       title = "ROC Curve for Only MMSE")
+p
+```
+
+```{r}
+models$lasso_reduced <- lasso_reduced
+model_labels <- c(model_labels, lasso_reduced = "LASSO with APOE")
+
+models$lasso_reduced_withAPOE <- model_with_apoe
+model_labels <- c(model_labels, lasso_reduced_withAPOE = "LASSO with APOE")
+
+models$lasso_onlyAPOE <- model_only_apoe
+model_labels <- c(model_labels, lasso_onlyAPOE = "LASSO only APOE")
+
+models$lasso_reduced_withMMSE <- lasso_reduced_withMMSE
+model_labels <- c(model_labels, lasso_reduced_withMMSE = "LASSO with MMSE")
+
+models$lasso_onlyMMSE <- model_only_mmse
+model_labels <- c(model_labels, lasso_onlyMMSE = "LASSO only MMSE")
+```
+
+# Model Evaluation on Test Set
+
+Evaluate all models on the held-out test set and generate ROC curves.
+
+```{r model_eval_on_test, fig.width=8, fig.height=6, fig.align='left'}
+test$Allgr <- factor(test$Allgr, levels = c("CN", "AD"))
+
+threshold <- round(nrow(AD) / (nrow(AD) + nrow(CN)), 3)
+
+# model_labels <- c(
+#     lasso = "LASSO",
+#     rf = "Random Forest",
+#     nb = "Naive Bayes",
+#     pls = "PLS",
+#     xgb = "XGBoost"
+# )
+
+roc_data_list <- list()
+metrics_list <- list()
+
+for (model_name in names(models)) {
+    if (model_name %in% c( "lasso_reduced", 
+                           "lasso_reduced_withAPOE", 
+                           "lasso_onlyAPOE", 
+                           "lasso_reduced_withMMSE",
+                           "lasso_onlyMMSE")) {
+        if (model_name == "lasso_reduced_withAPOE") {
+            x_test <-  test_with_apoe[,c("Allgr", features_with_apoe)]
+        } else if (model_name == "lasso_onlyAPOE") {
+            x_test <- test_only_apoe
+        } else if (model_name == "lasso_reduced") {
+            x_test <- test[, c("Allgr", top_features)]
+        } else if (model_name == "lasso_reduced_withMMSE") {
+            x_test <- test_with_mmse
+        } else if (model_name == "lasso_onlyMMSE") {
+            x_test <- test_only_mmse
+        } else {
+            x_test <- test
+        }
+    } else {
+        x_test <- test
+    }
+    model <- models[[model_name]]
+    print(model_name)
+
+    probs <- predict(model, x_test, type = "prob")[, "AD"]
+
+    roc_obj <- roc(
+        response = x_test$Allgr, predictor = probs,
+        levels = c("CN", "AD"), direction = "<"#, smooth = TRUE
+    )
+    roc_obj_raw <- roc(
+        response = x_test$Allgr, predictor = probs,
+        levels = c("CN", "AD"), direction = "<"#, smooth = FALSE
+    )
+    
+    auc_digits = 2
+    auc_ci <- pROC::ci.auc(roc_obj)
+    auc_value <- pROC::auc(roc_obj)
+    
+    auc_label <- paste0(model_labels[model_name], " (AUC = ",
+        formatC(auc_value, format = "f", digits = auc_digits), " [",
+        formatC(auc_ci[1], format = "f", digits = auc_digits), "–",
+        formatC(auc_ci[3], format = "f", digits = auc_digits), "])")
+
+    roc_df <- data.frame(
+        fpr = rev(roc_obj$specificities),
+        tpr = rev(roc_obj$sensitivities)
+    )
+    
+    preds <- factor(ifelse(probs > threshold, "AD", "CN"), 
+                    levels = c("CN", "AD"))
+
+    cm <- confusionMatrix(reference = test$Allgr, data = preds,
+                          mode = "everything", positive = "AD")
+    
+    conf_matrix <- cm$table
+  
+    metrics_list[[model_name]] <- data.frame(
+        Model = model_labels[model_name],
+        Accuracy = round(cm$overall["Accuracy"], 4),
+        `95% CI` = paste0("(", round(cm$overall["AccuracyLower"], 4),
+                          ", ", round(cm$overall["AccuracyUpper"], 4), ")"),
+        Kappa = round(cm$overall["Kappa"], 4),
+        Sensitivity = round(cm$byClass["Sensitivity"], 4),
+        Specificity = round(cm$byClass["Specificity"], 4),
+        `Positive Predictive Value (PPV)` = round(cm$byClass["Pos Pred Value"], 4),
+        `Negative Predictive Value (NPV)` = round(cm$byClass["Neg Pred Value"], 4),
+        `F1 Score` = round(cm$byClass["F1"], 4),
+        `Balanced Accuracy` = round(cm$byClass["Balanced Accuracy"], 4),
+        AUC = round(pROC::auc(roc_obj_raw), 2),
+        stringsAsFactors = FALSE
+    )
+
+    roc_data_list[[model_name]] <- data.table(
+        model = model_labels[model_name],
+        x = 1 - roc_obj$specificities,
+        y = roc_obj$sensitivities,
+        auc = as.numeric(pROC::auc(roc_obj_raw)),
+        auc_smooth = as.numeric(pROC::auc(roc_obj)),
+        auc_label = auc_label, 
+        roc_df = roc_df,
+        cm = list(cm)
+    )
+}
+
+summary_table <- bind_rows(metrics_list)
+roc_data <- rbindlist(roc_data_list)  |>
+    dplyr::mutate(
+        auc = dplyr::case_when(
+            model == "LASSO" ~ round(auc, 2),
+            TRUE ~ round(auc, 2)
+        )
+    )
+
+auc_order <- roc_data[, .(auc = unique(auc), auc_label = unique(auc_label)), by = model]
+auc_order <- auc_order[order(-auc)]  
+
+roc_data[, label := auc_label]
+roc_data[, label := factor(label, 
+                           levels = auc_order$auc_label)]
+
+gg_roc_test <- ggplot(roc_data |> 
+                          dplyr::filter(model %in% 
+                                            c("LASSO",
+                                              "Random Forest",
+                                              "Naive Bayes",
+                                              "PLS",
+                                              "XGBoost")), 
+                      aes(x = 1 - roc_df.fpr, y = roc_df.tpr, color = label)) +
+    geom_line(size = 1) +
+    geom_abline(linetype = "dashed", color = "gray40") +
+    labs(
+        x = "1 - Specificity", y = "Sensitivity",
+        title = "ROC Curves on Test Set",
+        subtitle = "Comparison of ML Models on Held-Out Data",
+        caption = "Binary classification: AD vs CN"
+    ) +
+    theme_bw() +
+    theme(
+        plot.title = element_text(hjust = 0.5, face = "bold"),
+        plot.subtitle = element_text(hjust = 0.5),
+        plot.caption = element_text(hjust = 1, face = "italic"),
+        legend.title = element_blank(),
+        legend.position = c(0.65, 0.16),
+        legend.text = element_text(size = 9),
+        legend.key.size = unit(0.45, "cm"),
+        axis.text.y = element_text(size = 11, angle = 90, hjust = 0.5),
+        axis.text.x = element_text(size = 11),
+        axis.title = element_text(size = 11)
+    ) +
+    coord_fixed()
+
+print(gg_roc_test)
+ggsave("results/roc_curves_testset.png", gg_roc_test, height = 5.7, width = 6.4, dpi = 700)
+```
+
+Summary Table on evaluation on test
+
+```{r summary_table_eval_on_test, fig.width=8, fig.height=6, fig.align='left'}
+colnames(summary_table) <- c("Model", "Accuracy", "95% Confidence Interval",
+                             "Kappa","Sensitivity", "Specificity", 
+                             "Positive Predictive Value (PPV)",
+                             "Negative Predictive Value (NPV)", 
+                             "F1 Score", "Balanced Accuracy",  "AUC")
+
+summary_table_print <- summary_table
+
+summary_table_print |>
+  mutate(across(where(is.numeric), ~ round(.x, 2))) |>
+  mutate(`95% Confidence Interval` = str_replace_all(
+    `95% Confidence Interval`,
+    "\\(([^,]+),\\s*([^)]+)\\)",
+    function(m) {
+      nums <- as.numeric(str_match(m, "\\(([^,]+),\\s*([^)]+)\\)")[, 2:3])
+      paste0("(", sprintf("%.2f", nums[1]), ", ", sprintf("%.2f", nums[2]), ")")
+    }
+  )) |>
+    kableExtra::kbl(caption = "Summary table", row.names = F) |>
+    kableExtra::kable_classic(full_width = TRUE, html_font = "Cambria") |>
+    kableExtra::kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+write.csv(summary_table_print, "results/validation_on_test.csv", row.names = FALSE)
+```
+
+# Model evaluation on Clinical Data
+
+```{r model_eval_on_clinical,  fig.width=8, fig.height=6, fig.align='left'}
+roc_data_clinic <- roc_data |>
+    dplyr::filter(model %in%
+        c(
+            "LASSO without APOE",
+            "LASSO with APOE",
+            "LASSO only APOE",
+            "LASSO with MMSE",
+            "LASSO only MMSE"
+        )) |>
+    dplyr::mutate(
+        auc_label = case_when(
+            model == "LASSO without APOE" ~ sub("LASSO without APOE", "~150 metabolites", auc_label),
+            model == "LASSO with APOE" ~ sub("LASSO with APOE", "~150 metabolites + APOE", auc_label),
+            model == "LASSO only APOE" ~ sub("LASSO only APOE", "APOE alone", auc_label),
+            model == "LASSO with MMSE" ~ sub("LASSO with MMSE", "~150 metabolites + APOE + MMSE", auc_label),
+            model == "LASSO only MMSE" ~ sub("LASSO only MMSE", "MMSE alone", auc_label)
+        )
+    )
+
+auc_order <- roc_data_clinic[, .(auc = unique(auc), auc_label = unique(auc_label)), by = model]
+auc_order <- auc_order[order(-auc)]  
+
+roc_data_clinic[, label := auc_label]
+roc_data_clinic[, label := factor(label, 
+                           levels = auc_order$auc_label)]
+
+gg_roc_test <- ggplot(roc_data_clinic, 
+                      aes(x = 1 - roc_df.fpr, y = roc_df.tpr, color = label)) +
+    geom_line(size = 1) +
+    geom_abline(linetype = "dashed", color = "gray40") +
+    labs(
+        x = "1 - Specificity", y = "Sensitivity",
+        title = "ROC Curves on Test Set",
+        subtitle = "Comparison of ML Models on Held-Out Data (Optimal Model m=151 vs Clinical Data)",
+        caption = "Binary classification: AD vs CN"
+    ) +
+    theme_bw() +
+    theme(
+        plot.title = element_text(hjust = 0.5, face = "bold"),
+        plot.subtitle = element_text(hjust = 0.5, size = 9),
+        plot.caption = element_text(hjust = 1, face = "italic"),
+        legend.title = element_blank(),
+        legend.position = c(0.63, 0.16),
+        legend.text = element_text(size = 7.6),
+        legend.key.size = unit(0.45, "cm"),
+        axis.text.y = element_text(size = 11, angle = 90, hjust = 0.5),
+        axis.text.x = element_text(size = 11),
+        axis.title = element_text(size = 11)
+    ) +
+    coord_fixed()
+
+print(gg_roc_test)
+ggsave("results/roc_curves_testset_with_apoe.png", gg_roc_test, height = 5.7, width = 6.4, dpi = 700)
+```
+
+```{r eval=TRUE, fig.width=14 , fig.height=6, fig.align='left'}
+plot_summary_final <- summary_table_print |>
+    dplyr::filter(!Model %in% c("LASSO", "Random Forest", "Naive Bayes", 
+                       "PLS", "XGBoost")) |>
+    dplyr::mutate(
+        Model = case_when(
+            Model == "LASSO without APOE" ~ sub("LASSO without APOE", "~150 metabolites", Model),
+            Model == "LASSO with APOE" ~ sub("LASSO with APOE", "~150 metabolites + APOE", Model),
+            Model == "LASSO only APOE" ~ sub("LASSO only APOE", "APOE alone", Model),
+            Model == "LASSO with MMSE" ~ sub("LASSO with MMSE", "~150 metabolites + APOE + MMSE", Model),
+            Model == "LASSO only MMSE" ~ sub("LASSO only MMSE", "MMSE alone", Model)
+        )
+    ) |> dplyr::arrange(AUC) |>
+  dplyr::mutate(Model = factor(Model, levels = unique(Model))) |> 
+  dplyr::select(where(is.numeric), Model) |>
+  dplyr::select(!c("Positive Predictive Value (PPV)", "Negative Predictive Value (NPV)", 
+            "Balanced Accuracy")) |>
+  pivot_longer(-Model, names_to = "Metric", values_to = "Score") |>
+  ggplot(aes(x = Metric, y = Model, fill = Score)) +
+  geom_tile(color = "grey90") +
+  geom_text(aes(label = round(Score, 2)), size = 6, colour = "white") +
+  scale_fill_gradientn(colors = brewer.pal(9, "Blues"), limits = c(0.5, 1)) +
+  theme_minimal(base_size = 13) +
+  labs(
+    title = "Performance of Metabolites-APOE-MMSE-based Models",
+    x = "Metric", y = "Model", fill = "Score"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust =  0.5, size = 14),
+    axis.text.y = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+ggsave("results/heatmap_plot_summary_final.png", plot_summary_final,
+       width = 11, height = 3, dpi = 700)
+
+plot_summary_final
+```
+
+# All confusion matrices
+
+```{r fig.width=9, fig.height=9, fig.align='left', out.width='100%'}
+model_names <- roc_data |>
+    dplyr::mutate(
+        model = case_when(
+            model == "LASSO without APOE" ~ sub("LASSO without APOE", "~150 metabolites", model),
+            model == "LASSO with APOE" ~ sub("LASSO with APOE", "~150 metabolites + APOE", model),
+            model == "LASSO only APOE" ~ sub("LASSO only APOE", "APOE alone", model),
+            model == "LASSO with MMSE" ~ sub("LASSO with MMSE", "~150 metabolites + APOE + MMSE", model),
+            model == "LASSO only MMSE" ~ sub("LASSO only MMSE", "MMSE alone", model),
+            
+            model == "LASSO" ~ sub("LASSO", "LASSO", model),
+            model == "PLS" ~ sub("PLS", "PLS", model),
+            model == "Random Forest" ~ sub("Random Forest", "Random Forest", model),
+            model == "Naive Bayes" ~ sub("Naive Bayes", "Naive Bayes", model),
+            model == "XGBoost" ~ sub("XGBoost", "XGBoost", model)
+        )
+    ) |> dplyr::select(model) |> unique()
+
+model_keys <- roc_data_list |> names()
+
+make_conf_plot <- function(cm_obj, model_title) {
+  conf_df <- as.data.frame(as.table(cm_obj))
+  ggplot(conf_df, aes(x = Reference, y = fct_rev(Prediction), fill = Freq)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = Freq), size = 4, color = "black", fontface = "bold") +
+    scale_fill_gradient(low = "white", high = "steelblue") +
+    labs(title = model_title, x = "Actual", y = "Predicted", fill = "Count") +
+    theme_minimal(base_size = 10) +
+    theme(plot.title = element_text(hjust = 0.5, size = 10, face = "bold"),
+          axis.text = element_text(size = 8, face = "bold"),
+          axis.title = element_text(size = 9),
+          legend.position = "none",
+          aspect.ratio = 1)
+}
+
+conf_plots <- list()
+for (i in seq_along(model_keys[1:9])) {
+  model_key <- model_keys[i]
+  model_title <- model_names[i]
+  
+  cm <- roc_data_list[[model_key]]$cm[[1]] 
+  conf_plots[[i]] <- make_conf_plot(cm, model_title)
+}
+
+library(patchwork)
+combined_plot_all <- wrap_plots(conf_plots, ncol = 3) + 
+  plot_annotation(title = "Confusion Matrices for All Models",
+                  theme = theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold")))
+
+ggsave("results/confusion_matrices_all_models.png", combined_plot_all,
+       width = 9, height = 7, dpi = 700)
+
+combined_plot <- wrap_plots(conf_plots[6:8], ncol = 3) + 
+  plot_annotation(title = "Confusion Matrices for Optimal Models with/without APOE",
+                  caption = "Optimal model (151 metabolites)", 
+                  theme = theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold")))
+
+ggsave("results/confusion_matrices_all_models_withAPOE.png", combined_plot,
+       width = 9, height = 6, dpi = 700)
+
+combined_plot_all
+
+```
+
+```{r fig.width=4, fig.height=4, fig.align='center'}
+conf_df <- as.data.frame(as.table(roc_data_list$lasso_reduced_withMMSE$cm[[1]]))
+
+conf_plot <- ggplot(conf_df, aes(x = Reference, y = fct_rev(Prediction), fill = Freq)) +
+      geom_tile(color = "white") +
+      geom_text(aes(label = Freq), size = 6, color = "black", fontface = "bold") +
+      scale_fill_gradient(low = "white", high = "steelblue") +
+      labs(title = "Confusion matrix (Optimal Model)",
+          x = "Actual class", y = "Predicted class", fill = "Count") +
+      theme(plot.title = element_text(hjust = 0.5, size = 12, face = "bold"),
+          axis.text = element_text(size = 11, face = "bold"), aspect.ratio = 1)
+
+conf_plot
+ggsave("results/lasso_reduced_optimal.png", conf_plot, height = 5, width = 5, dpi = 700)
+```
+
+All models were evaluated on the held-out test set, with performance
+metrics including accuracy, kappa, sensitivity, specificity, positive
+and negative predictive values, F1 score, balanced accuracy, and ROC
+AUCinvestigate AUCs, ROC curves, and confusion matrices were generated.
+A threshold based on class proportions was used for classification.
+Results were summarized in tables and visualized with ROC curves and
+confusion matrices.
+
+<!-- # Comparative Analysis -->
+
+<!-- Compare model performances and generate a summary table and combined -->
+
+<!-- plots. -->
+
+<!-- ```{r model_comparision, eval=FALSE} -->
+
+<!-- performance <- data.frame( -->
+
+<!--   Model = c("57 Metabolites", "Top 5 Metabolites", "Top 5 + APOE"), -->
+
+<!--   AUC = c(pROC::auc(roc_list$lasso), pROC::auc(roc_top), pROC::auc(roc_with_apoe)), -->
+
+<!--   Sensitivity = c(sensitivity(predict(models$lasso, test, type = "raw"), test$Allgr, positive = "AD"), -->
+
+<!--                   sensitivity(predict(model_top, test, type = "raw"), test$Allgr, positive = "AD"), -->
+
+<!--                   sensitivity(predict(model_with_apoe, test_with_apoe, type = "raw"), test_with_apoe$Allgr, positive = "AD")), -->
+
+<!--   Specificity = c(specificity(predict(models$lasso, test, type = "raw"), test$Allgr, positive = "AD"), -->
+
+<!--                   specificity(predict(model_top, test, type = "raw"), test$Allgr, positive = "AD"), -->
+
+<!--                   specificity(predict(model_with_apoe, test_with_apoe, type = "raw"), test_with_apoe$Allgr, positive = "AD")) -->
+
+<!-- ) -->
+
+<!-- kable(performance, caption = "Model Performance on Test Set") -->
+
+<!-- write.csv(performance, "model_performance.csv") -->
+
+<!-- # ROC plot -->
+
+<!-- plot(roc_list$lasso, col = "blue", main = "Comparative ROC Curves") -->
+
+<!-- lines(roc_top, col = "green") -->
+
+<!-- lines(roc_with_apoe, col = "red") -->
+
+<!-- legend("bottomright", legend = c("57 Metabolites", "Top 5 Metabolites", "Top 5 + APOE"),  -->
+
+<!--        col = c("blue", "green", "red"), lty = 1) -->
+
+<!-- ggsave("comparative_roc_curves.png") -->
+
+<!-- ``` -->

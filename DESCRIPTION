@@ -8,8 +8,8 @@ Authors@R:
            comment = c(ORCID = "0009-0001-9514-751X"))
 Description: Alzheimer's Disease Neuroimaging Initiative (ADNI) provide 
     a list of omics, among them there is metabolomics data. We collected 
-    those data and curated them with closer look, for helping researchers 
-    and scientists to exploite and navigate easily into the ADNI metabolomic
+    those data and curated them with closer look, for helping users
+    to exploite and navigate easily into the ADNI metabolomic
     datasets. It is possible to access to various datasets from the ADNI, 
     including demographic, clinical, biomarker, imaging, and cognitive 
     composite data.
