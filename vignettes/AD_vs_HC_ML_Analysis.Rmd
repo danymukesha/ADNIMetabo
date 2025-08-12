@@ -1,17 +1,18 @@
 ---
 title: "Additional file 1: Supplementary Material and Methods"
 author: "Dany Mukesha"
-output:
-  html_document:
-    toc: true
-    toc_float: true
-    theme: flatly
-    self_contained: true
-    code_folding: hide
-  pdf_document:
-    toc: true
-  word_document:
-    toc: true
+# output:
+#   html_document:
+#     toc: true
+#     toc_float: true
+#     theme: flatly
+#     self_contained: true
+#     code_folding: hide
+#   pdf_document:
+#     toc: true
+#   word_document:
+#     toc: true
+output: rmarkdown::html_vignette
 editor_options:
   markdown:
     wrap: 72
@@ -27,6 +28,10 @@ abstract: |
   evaluation, and model refinement. All analyses were performed using R
   (version 4.3.2) with relevant packages for statistical modeling and
   visualization.
+vignette: >
+  %\VignetteIndexEntry{ADNI_metabolomics_statistical_analysis}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
 ---
 
 # Software and Environment Setup

@@ -1,24 +1,28 @@
 ---
 title: "ADNI Baseline Analysis: Alzheimer's Disease vs Cognitively Normal"
-subtitle: "Case-Control Study
-author: "Analysis Report"
+subtitle: "Case-Control Study"
+author: "Dany MUKESHA"
 date: "`r Sys.Date()`"
-output:
-  html_document:
-    toc: true
-    toc_float: true
-    theme: flatly
-    code_folding: hide
-    fig_width: 10
-    fig_height: 6
-  pdf_document:
-    toc: true
-    fig_width: 8
-    fig_height: 5
+# output:
+#   html_document:
+#     toc: true
+#     toc_float: true
+#     theme: flatly
+#     code_folding: hide
+#     fig_width: 10
+#     fig_height: 6
+#   pdf_document:
+#     toc: true
+#     fig_width: 8
+#     fig_height: 5
+output: rmarkdown::html_vignette
 vignette: >
   %\VignetteIndexEntry{ADNI_baseline_analysis_AD-vs-CN}
-  %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
 
 ```{r setup, include=FALSE}
@@ -54,7 +58,10 @@ custom_colors <- c("#2E86AB", "#A23B72", "#F18F01", "#C73E1D")
 
 # Executive Summary
 
-This analysis examines baseline differences between Alzheimer's Disease (AD) patients and Cognitively Normal (CN) controls in the ADNI dataset. The study includes demographic, clinical, neuropsychological, and biomarker comparisons.
+This analysis examines baseline differences between Alzheimer's Disease
+(AD) patients and Cognitively Normal (CN) controls in the ADNI dataset.
+The study includes demographic, clinical, neuropsychological, and
+biomarker comparisons.
 
 # Data Preparation
 
@@ -479,27 +486,28 @@ cat("  Chi-square p-value:", format.pval(apoe_test$p.value, digits = 3), "\n")
 
 ## Key Statistical Differences
 
-The analysis reveals significant differences between AD patients and CN controls across multiple domains:
+The analysis reveals significant differences between AD patients and CN
+controls across multiple domains:
 
-**Demographics:**
-- AD patients are significantly older than CN controls
-- Higher proportion of APOE4 carriers in AD group
-- No significant gender differences
+**Demographics:** - AD patients are significantly older than CN
+controls - Higher proportion of APOE4 carriers in AD group - No
+significant gender differences
 
-**Cognitive Function:**
-- AD patients show severe impairment on all cognitive measures
-- Largest effect sizes observed for ADAS scores and memory tests
-- MMSE scores clearly differentiate the groups
+**Cognitive Function:** - AD patients show severe impairment on all
+cognitive measures - Largest effect sizes observed for ADAS scores and
+memory tests - MMSE scores clearly differentiate the groups
 
-**Biomarkers:**
-- Lower CSF Aβ42 levels in AD patients
-- Higher CSF Tau levels in AD patients  
+**Biomarkers:** - Lower CSF Aβ42 levels in AD patients - Higher CSF Tau
+levels in AD patients\
 - Reduced FDG-PET metabolism in AD group
 
-**Clinical Implications:**
-The multivariate model identifies key predictors of AD diagnosis, with cognitive measures and biomarkers showing the strongest associations. These findings support the use of combined cognitive and biomarker assessments for AD diagnosis and monitoring.
+**Clinical Implications:** The multivariate model identifies key
+predictors of AD diagnosis, with cognitive measures and biomarkers
+showing the strongest associations. These findings support the use of
+combined cognitive and biomarker assessments for AD diagnosis and
+monitoring.
 
----
+------------------------------------------------------------------------
 
-*Analysis completed on `r Sys.Date()`*
-*Data source: ADNI (Alzheimer's Disease Neuroimaging Initiative)*
+*Analysis completed on `r Sys.Date()`* *Data source: ADNI (Alzheimer's
+Disease Neuroimaging Initiative)*

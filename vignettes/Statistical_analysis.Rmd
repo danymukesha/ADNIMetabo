@@ -2,16 +2,28 @@
 title: "ADNI metabolomics statistical analysis report"
 author: "Firalis/Lodiag"
 date: "`2024-07-30`"
-output: 
-  rmdformats::readthedown:
-    self_contained: true
-    code_folding: hide
+# output: 
+#   rmdformats::readthedown:
+#     self_contained: true
+#     code_folding: hide
+output: rmarkdown::html_vignette
 always_allow_html: true
 editor_options: 
   markdown: 
     wrap: 72
 bibliography: references.bib 
+vignette: >
+  %\VignetteIndexEntry{ADNI_metabolomics_statistical_analysis}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
 ---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, 
+                      collapse = TRUE, comment = "#>")
+
+# knitr::opts_chunk$set(echo = TRUE)
+```
 
 ```{r libraries, warning=FALSE, message=FALSE}
 library(knitr)
@@ -26,13 +38,6 @@ library(ggrepel)
 
 library(FactoMineR)
 library(data.table)
-```
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(warning = FALSE, message = FALSE, 
-                      collapse = TRUE, comment = "#>")
-
-# knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ## **Background**
@@ -80,7 +85,7 @@ metadata <- c("Gender", "Allgr", "Age" )
 
 # Cohort Characteristics
 
-```{r descrptive_plot, fig.width=7, fig.height=7, fig.align='center', out.width='80%'}
+```{r descriptive_plot, fig.width=7, fig.height=7, fig.align='center', out.width='80%'}
 color_palette <- c("#1f78b4", "#33a02c")
 color_gender <- c("#9f9f1a", "#6a3d1a")
 
@@ -103,12 +108,11 @@ p2 <- ggplot(gender_cohort, aes(x = Allgr, y = patients, fill = Gender)) +
    theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5))
 
 p3 <- ggplot(data0, aes(x = Allgr, y = Age)) +
-  geom_violin(aes(fill = Gender), trim = FALSE, color = "black", 
+  geom_violin(aes(fill = Gender), trim = FALSE,  
               alpha = 0.6, position = position_dodge(1)) +
-  geom_boxplot(width = 0.2, position = position_dodge(1), color = "black", 
+  geom_boxplot(width = 0.2, position = position_dodge(1), 
                aes(fill = Gender), outlier.shape = NA) +
   scale_fill_manual(values = color_gender) +
-  scale_color_manual(values = color_gender) +
   labs(title = "Age distribution across groups", 
        x = "Groups", y = "Age") +
   theme_bw() + ylim(20, 100) + guides(fill = "none") +
@@ -117,12 +121,11 @@ p3 <- ggplot(data0, aes(x = Allgr, y = Age)) +
 
 # 3. Age distribution across groups (violin plot)
 p3 <- ggplot(data0, aes(x = Allgr, y = Age)) +
-  geom_violin(aes(fill = Gender), trim = FALSE, color = "black", 
+  geom_violin(aes(fill = Gender), trim = FALSE, 
               alpha = 0.6, position = position_dodge(1)) +
-  geom_boxplot(width = 0.2, position = position_dodge(1), color = "black", 
+  geom_boxplot(width = 0.2, position = position_dodge(1), 
                aes(fill = Gender), outlier.shape = NA) +
   scale_fill_manual(values = color_gender) +
-  scale_color_manual(values = color_gender) +
   labs(title = "Age distribution across groups", 
        x = "Groups", y = "Age") +
   theme_bw() + ylim(20, 100) + guides(fill = "none") +
@@ -145,7 +148,7 @@ p4 <- data0 |>
 
 combined_plot <- gridExtra::grid.arrange(
   ggpubr::ggarrange(p3, p2, common.legend = TRUE,
-            legend="right", ncol = 2), 
+            legend = "right", ncol = 2), 
   p4, nrow = 2)
 
 combined_plot1 <- ggpubr::as_ggplot(combined_plot) +                        
