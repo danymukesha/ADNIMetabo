@@ -1,7 +1,7 @@
 ---
-title: "ADNI Baseline Analysis: Alzheimer's Disease vs Cognitively Normal"
-subtitle: "Case-Control Study
-author: "Analysis Report"
+title: 'ADNI Baseline Analysis: Alzheimer''s Disease vs Cognitively Normal'
+# subtitle: "Case-Control Study"
+author: "Dany MUKESHA"
 date: "`r Sys.Date()`"
 output:
   html_document:
@@ -11,14 +11,15 @@ output:
     code_folding: hide
     fig_width: 10
     fig_height: 6
+  word_document:
+    toc: true
   pdf_document:
     toc: true
     fig_width: 8
     fig_height: 5
-vignette: >
-  %\VignetteIndexEntry{ADNI_baseline_analysis_AD-vs-CN}
-  %\VignetteEngine{knitr::rmarkdown}
-  %\VignetteEncoding{UTF-8}
+editor_options:
+  markdown:
+    wrap: 72
 ---
 
 ```{r setup, include=FALSE}
@@ -45,7 +46,7 @@ library(car)
 library(effsize)
 devtools::load_all()
 
-theme_set(#theme_minimal() + 
+theme_set(theme_minimal() + 
           theme(plot.title = element_text(hjust = 0.5, face = "bold"),
                 legend.position = "bottom"))
 
@@ -54,7 +55,10 @@ custom_colors <- c("#2E86AB", "#A23B72", "#F18F01", "#C73E1D")
 
 # Executive Summary
 
-This analysis examines baseline differences between Alzheimer's Disease (AD) patients and Cognitively Normal (CN) controls in the ADNI dataset. The study includes demographic, clinical, neuropsychological, and biomarker comparisons.
+This analysis examines baseline differences between Alzheimer's Disease
+(AD) patients and Cognitively Normal (CN) controls in the ADNI dataset.
+The study includes demographic, clinical, neuropsychological, and
+biomarker comparisons.
 
 # Data Preparation
 
@@ -83,9 +87,13 @@ baseline_data <- adnim %>%
   ) %>%
   select(-ABETA_bl, -TAU_bl, -ABETA, -TAU) # Remove string versions
 
-# Summary of sample sizes
 cat("Sample Sizes:\n")
 table(baseline_data$Group)
+```
+
+```{r get-rids-with-metabo-data, eval=FALSE, include=FALSE}
+data <- data.table::fread("03_EffectsAdjusted.csv", sep = ",") 
+RIDs_with_metabo_data <- data$RID
 ```
 
 # Demographic Characteristics
@@ -93,7 +101,7 @@ table(baseline_data$Group)
 ## Table 1: Baseline Demographics and Clinical Characteristics
 
 ```{r demographics-table}
-demo_vars <- c("AGE", "PTGENDER", "PTEDUCAT", "Education_level", 
+demo_vars <- c("AGE", "PTGENDER", "PTEDUCAT", "PTRACCAT", "Education_level", 
                "APOE4", "APOE4_status")
 
 tab1 <- CreateTableOne(vars = demo_vars, 
@@ -155,12 +163,13 @@ grid.arrange(p1, p2, p3, p4, ncol = 2)
 ```{r cognitive-table}
 cog_vars <- c("MMSE_bl", "ADAS11_bl", "ADAS13_bl", "ADASQ4_bl", 
               "LDELTOTAL_BL", "RAVLT_immediate_bl", "RAVLT_learning_bl", 
-              "RAVLT_forgetting_bl", "MOCA_bl")
+              "RAVLT_forgetting_bl", "MOCA_bl", "CDRSB_bl")
 
 tab2 <- CreateTableOne(vars = cog_vars, 
                        strata = "Group", 
                        data = baseline_data,
-                       test = TRUE)
+                       test = TRUE,
+                       testNonNormal = TRUE)
 
 kable(print(tab2, printToggle = FALSE), 
       caption = "Table 2: Neuropsychological Assessment Scores") %>%
@@ -185,6 +194,7 @@ cog_data <- baseline_data %>%
       Test == "RAVLT_learning_bl" ~ "RAVLT Learning",
       Test == "RAVLT_forgetting_bl" ~ "RAVLT Forgetting",
       Test == "MOCA_bl" ~ "MOCA",
+      Test == "CDRSB_bl" ~ "CDR-SB",
       TRUE ~ Test
     )
   )
@@ -193,7 +203,7 @@ ggplot(cog_data, aes(x = Group, y = Score, fill = Group)) +
   geom_boxplot(alpha = 0.7) +
   geom_jitter(width = 0.2, alpha = 0.3, size = 0.5) +
   scale_fill_manual(values = custom_colors[1:2]) +
-  facet_wrap(~ Test_Label, scales = "free_y", ncol = 3) +
+  facet_wrap(~ Test_Label, scales = "free_y", ncol = 5) +
   labs(title = "Cognitive Test Scores by Group", 
        y = "Score") +
   theme(legend.position = "none", 
@@ -298,7 +308,8 @@ corrplot(cor(bio_corr_data, use = "complete.obs"),
 # data for modeling (complete cases only)
 model_data <- baseline_data %>%
   select(Group, AGE, Male, PTEDUCAT, APOE4_1, APOE4_2,
-         MMSE_bl, ADAS11_bl, FDG_bl, ABETA_numeric, TAU_numeric) %>%
+         MMSE_bl, ADAS11_bl, #MOCA_bl,  CDRSB_bl, 
+         FDG_bl, ABETA_numeric, TAU_numeric,) %>%
   mutate(AD = ifelse(Group == "AD", 1, 0)) %>%
   na.omit()
 
@@ -306,7 +317,8 @@ cat("Model data dimensions:", dim(model_data), "\n")
 
 # Univariate models
 uni_vars <- c("AGE", "Male", "PTEDUCAT", "APOE4_1", "APOE4_2", 
-              "MMSE_bl", "ADAS11_bl", "FDG_bl", "ABETA_numeric", "TAU_numeric")
+              "MMSE_bl", "ADAS11_bl", "FDG_bl", #"MOCA_bl",  "CDRSB_bl", 
+              "ABETA_numeric", "TAU_numeric")
 
 uni_results <- map_dfr(uni_vars, ~{
   formula_str <- paste("AD ~", .x)
@@ -318,7 +330,8 @@ uni_results <- map_dfr(uni_vars, ~{
 
 # Multivariate model
 multi_model <- glm(AD ~ AGE + Male + PTEDUCAT + APOE4_1 + APOE4_2 + 
-                   MMSE_bl + ADAS11_bl + FDG_bl + ABETA_numeric + TAU_numeric,
+                   MMSE_bl + ADAS11_bl + #MOCA_bl +  CDRSB_bl +
+                   FDG_bl + ABETA_numeric + TAU_numeric,
                    data = model_data, family = "binomial")
 
 multi_results <- tidy(multi_model) %>%
@@ -352,6 +365,8 @@ forest_data <- multi_results %>%
       term == "APOE4_2" ~ "APOE4 (2 alleles)",
       term == "MMSE_bl" ~ "MMSE score",
       term == "ADAS11_bl" ~ "ADAS-11 score",
+      term == "MOCA_bl" ~ "MOCA score",
+      term == "CDRSB_bl" ~ "CDRSB",
       term == "FDG_bl" ~ "FDG-PET",
       term == "ABETA_numeric" ~ "CSF Aβ42",
       term == "TAU_numeric" ~ "CSF Tau",
@@ -479,27 +494,28 @@ cat("  Chi-square p-value:", format.pval(apoe_test$p.value, digits = 3), "\n")
 
 ## Key Statistical Differences
 
-The analysis reveals significant differences between AD patients and CN controls across multiple domains:
+The analysis reveals significant differences between AD patients and CN
+controls across multiple domains:
 
-**Demographics:**
-- AD patients are significantly older than CN controls
-- Higher proportion of APOE4 carriers in AD group
-- No significant gender differences
+**Demographics:** - AD patients are significantly older than CN
+controls - Higher proportion of APOE4 carriers in AD group - No
+significant gender differences
 
-**Cognitive Function:**
-- AD patients show severe impairment on all cognitive measures
-- Largest effect sizes observed for ADAS scores and memory tests
-- MMSE scores clearly differentiate the groups
+**Cognitive Function:** - AD patients show severe impairment on all
+cognitive measures - Largest effect sizes observed for ADAS scores and
+memory tests - MMSE scores clearly differentiate the groups
 
-**Biomarkers:**
-- Lower CSF Aβ42 levels in AD patients
-- Higher CSF Tau levels in AD patients  
+**Biomarkers:** - Lower CSF Aβ42 levels in AD patients - Higher CSF Tau
+levels in AD patients\
 - Reduced FDG-PET metabolism in AD group
 
-**Clinical Implications:**
-The multivariate model identifies key predictors of AD diagnosis, with cognitive measures and biomarkers showing the strongest associations. These findings support the use of combined cognitive and biomarker assessments for AD diagnosis and monitoring.
+**Clinical Implications:** The multivariate model identifies key
+predictors of AD diagnosis, with cognitive measures and biomarkers
+showing the strongest associations. These findings support the use of
+combined cognitive and biomarker assessments for AD diagnosis and
+monitoring.
 
----
+------------------------------------------------------------------------
 
-*Analysis completed on `r Sys.Date()`*
-*Data source: ADNI (Alzheimer's Disease Neuroimaging Initiative)*
+*Analysis completed on `r Sys.Date()`* *Data source: ADNI (Alzheimer's
+Disease Neuroimaging Initiative)*

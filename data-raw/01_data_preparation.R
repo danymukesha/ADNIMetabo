@@ -104,7 +104,8 @@ ADNIMERGE <- new(
 # ADNIMERGE revision ####
 # Relevant Columns of ADNIMERGE
 adnim_cols <- c(
-    "RID", "PTID", "VISCODE", "AGE", "PTGENDER", "PTEDUCAT", "APOE4",
+    "RID", "PTID", "VISCODE", "AGE", "PTGENDER", "PTEDUCAT", "PTRACCAT",
+    "APOE4",
     "DX_bl", "DX",
     "FDG_bl", "FDG",
     "AV45_bl", "AV45",
@@ -114,11 +115,20 @@ adnim_cols <- c(
     "ADAS13_bl", "ADAS13",
     "ADASQ4_bl", "ADASQ4",
     "LDELTOTAL_BL", "LDELTOTAL",
-    "MMSE_bl", "MMSE", "MOCA", "MOCA_bl",
+    "MMSE_bl", "MMSE", "MOCA", "MOCA_bl", "CDRSB_bl", "CDRSB",
     "RAVLT_immediate_bl", "RAVLT_immediate",
     "RAVLT_learning_bl", "RAVLT_learning",
     "RAVLT_forgetting_bl", "RAVLT_forgetting",
-    "ICV_bl", "ICV"
+    "ICV_bl", "ICV",
+    "PIB", "PIB_bl",
+    "FLDSTRENG_bl", "FLDSTRENG",
+    "FSVERSION_bl", "FSVERSION",
+    "Ventricles_bl", "Ventricles",
+    "Hippocampus_bl", "Hippocampus",
+    "WholeBrain_bl", "WholeBrain",
+    "Entorhinal_bl", "Entorhinal",
+    "Fusiform_bl", "Fusiform",
+    "MidTemp_bl", "MidTemp"
 )
 
 
