@@ -25,7 +25,12 @@ Suggests:
     RefManageR,
     rmarkdown,
     sessioninfo,
-    testthat
+    testthat,
+    ROCR,
+    dplyr,
+    data.table,
+    caret,
+    logspline
 VignetteBuilder: knitr
 Depends: 
     R (>= 3.5)
