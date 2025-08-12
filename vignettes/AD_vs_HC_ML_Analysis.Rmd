@@ -1,6 +1,6 @@
 ---
 title: "Additional file 1: Supplementary Material and Methods"
-author: "Dany Mukesha, Guillaume Sacco"
+author: "Dany Mukesha"
 output:
   html_document:
     toc: true
