@@ -20,31 +20,36 @@ transpose_df <- function(df) {
 
 # QC data ====
 ## FIA ====
-FIA_QC <-  openxlsx::read.xlsx(
+FIA_QC <- openxlsx::read.xlsx(
     xlsxFile = "data-raw/ADMC_DUKE_Q500_FIA_QC_20230522.xlsx",
-    skipEmptyRows = TRUE, sheet = 'ADMC_DUKE_Q500_FIA_QC') |>
+    skipEmptyRows = TRUE, sheet = "ADMC_DUKE_Q500_FIA_QC"
+) |>
     tibble::tibble()
 
 FIA_LODs <- FIA_QC |>
     dplyr::slice(1:8) |>
-    dplyr::select_if( ~ !any(is.na(.))) |>
+    dplyr::select_if(~ !any(is.na(.))) |>
     transpose_df() |>
     janitor::row_to_names(row_number = 1) |>
     dplyr::rename("Short.Name/Injection.Number" = "Injection.Number")
 
-FIA_QC_samples <-  FIA_QC |>
+FIA_QC_samples <- FIA_QC |>
     dplyr::slice(9:n()) |>
-    dplyr::select(-c(Customer.Sample.Identification,
-                     Sample.Bar.Code, Sample.Type,
-                     Sample.Identification, Species,
-                     Material, Well.Position,
-                     Sample.Volume, Run.Number,
-                     Injection.Number))
+    dplyr::select(-c(
+        Customer.Sample.Identification,
+        Sample.Bar.Code, Sample.Type,
+        Sample.Identification, Species,
+        Material, Well.Position,
+        Sample.Volume, Run.Number,
+        Injection.Number
+    ))
 
 K <- FIA_QC_samples |>
-    ADNIMetabo:::process_data_with_report(LODs = FIA_LODs,
-                             inj_type = "FIA",
-                             qc_samples = TRUE)
+    ADNIMetabo:::process_data_with_report(
+        LODs = FIA_LODs,
+        inj_type = "FIA",
+        qc_samples = TRUE
+    )
 
 FIA_QC_samples <- K$processed_data
 K$report$removed_columns
@@ -52,9 +57,10 @@ K$report$imputed_columns
 rm(K)
 
 ## UPLC ====
-UPLC_QC <-  openxlsx::read.xlsx(
+UPLC_QC <- openxlsx::read.xlsx(
     xlsxFile = "data-raw/ADMC_DUKE_Q500_UPLC_QC_20230522.xlsx",
-    skipEmptyRows = TRUE, sheet = 'ADMC_DUKE_Q500_UPLC_QC') |>
+    skipEmptyRows = TRUE, sheet = "ADMC_DUKE_Q500_UPLC_QC"
+) |>
     tibble::tibble()
 
 UPLC_LODs <- UPLC_QC |>
@@ -66,17 +72,21 @@ UPLC_LODs <- UPLC_QC |>
 
 UPLC_QC_samples <- UPLC_QC |>
     dplyr::slice(6:n()) |>
-    dplyr::select(-c(Customer.Sample.Identification,
-                     Sample.Bar.Code, Sample.Type,
-                     Sample.Identification, Species,
-                     Material, Well.Position,
-                     Sample.Volume, Run.Number,
-                     Injection.Number, ))
+    dplyr::select(-c(
+        Customer.Sample.Identification,
+        Sample.Bar.Code, Sample.Type,
+        Sample.Identification, Species,
+        Material, Well.Position,
+        Sample.Volume, Run.Number,
+        Injection.Number,
+    ))
 
 K <- UPLC_QC_samples |>
-    ADNIMetabo:::process_data_with_report(LODs = UPLC_LODs,
-                             inj_type = "UPLC",
-                             qc_samples = TRUE)
+    ADNIMetabo:::process_data_with_report(
+        LODs = UPLC_LODs,
+        inj_type = "UPLC",
+        qc_samples = TRUE
+    )
 
 UPLC_QC_samples <- K$processed_data |>
     mutate_at(vars(-c(Plate.Bar.Code)), as.numeric)
@@ -88,17 +98,20 @@ rm(K)
 ## FIA ====
 FIA_Metabo <- data.table::fread(
     input = "data-raw/ADMC_DUKE_Q500_FIA_11Nov2024.csv",
-    sep = ",") |> tibble::tibble()
+    sep = ","
+) |> tibble::tibble()
 
 FIA_Metabo <- FIA_Metabo |>
-    dplyr::select(-c(`Customer Sample Identification`,
-                     `Sample Bar Code`, # `Sample Type`,
-                     `Sample Identification`, Species,
-                     Material, `Well Position`,
-                     `Sample Volume`, `Run Number`,
-                     `Injection Number`,
-                     EXAMDATE, #`Plate Bar Code`,
-                     update_stamp))
+    dplyr::select(-c(
+        `Customer Sample Identification`,
+        `Sample Bar Code`, # `Sample Type`,
+        `Sample Identification`, Species,
+        Material, `Well Position`,
+        `Sample Volume`, `Run Number`,
+        `Injection Number`,
+        EXAMDATE, # `Plate Bar Code`,
+        update_stamp
+    ))
 
 FIA_processed <- FIA_Metabo |>
     dplyr::rename(VISCODE = VISCODE2) |>
@@ -109,17 +122,20 @@ FIA_processed <- FIA_Metabo |>
 ## UPLC ====
 UPLC_Metabo <- data.table::fread(
     input = "data-raw/ADMC_DUKE_Q500_UPLC_11Nov2024.csv",
-    sep = ",") |> tibble::tibble()
+    sep = ","
+) |> tibble::tibble()
 
 UPLC_Metabo <- UPLC_Metabo |>
-    dplyr::select(-c(`Customer Sample Identification`,
-                     `Sample Bar Code`, #`Sample Type`,
-                     `Sample Identification`, Species,
-                     Material, `Well Position`,
-                     `Sample Volume`, `Run Number`,
-                     `Injection Number`,
-                     EXAMDATE, # `Plate Bar Code`,
-                     update_stamp))
+    dplyr::select(-c(
+        `Customer Sample Identification`,
+        `Sample Bar Code`, # `Sample Type`,
+        `Sample Identification`, Species,
+        Material, `Well Position`,
+        `Sample Volume`, `Run Number`,
+        `Injection Number`,
+        EXAMDATE, # `Plate Bar Code`,
+        update_stamp
+    ))
 
 UPLC_processed <- UPLC_Metabo |>
     dplyr::rename(VISCODE = VISCODE2) |> # renamed for f(x) ADNIMetabo:::add_metadata
@@ -140,13 +156,15 @@ FIA_QC_samples <- FIA_QC_samples |>
 colnames(FIA_QC_samples) <-
     gsub("\\.", " ", FIA_QC_samples |> colnames())
 
-commcols <- intersect(names(FIA_QC_samples),
-                      names(FIA_processed$processed_data))
+commcols <- intersect(
+    names(FIA_QC_samples),
+    names(FIA_processed$processed_data)
+)
 
 FIA_processed$qc_w_metabo_data <- bind_rows( # lst()
     select(FIA_QC_samples, all_of(commcols)),
     select(FIA_processed$processed_data, all_of(commcols))
-    )
+)
 
 ## UPLC ====
 UPLC_QC_samples <- UPLC_QC_samples |>
@@ -159,8 +177,10 @@ UPLC_QC_samples <- UPLC_QC_samples |>
 colnames(UPLC_QC_samples) <-
     gsub("\\.", " ", UPLC_QC_samples |> colnames())
 
-commcols <- intersect(names(UPLC_QC_samples),
-                      names(UPLC_processed$processed_data))
+commcols <- intersect(
+    names(UPLC_QC_samples),
+    names(UPLC_processed$processed_data)
+)
 
 UPLC_processed$qc_w_metabo_data <- bind_rows( # lst()
     select(UPLC_QC_samples, all_of(commcols)),
@@ -185,12 +205,16 @@ usethis::use_data(FIA_processed, overwrite = TRUE)
 ## todo: recheck well the above code, but everything should be good.
 
 All_Metabo <- UPLC_processed$qc_w_metabo_data |> dplyr::full_join(
-    FIA_processed$qc_w_metabo_data, by = c("RID" = "RID", "VISCODE" = "VISCODE"))
+    FIA_processed$qc_w_metabo_data,
+    by = c("RID" = "RID", "VISCODE" = "VISCODE")
+)
 
 # let's load a collection of key metrics and observations for all ADNI participants
-adnimerge <-  data.table::fread(
+adnimerge <- data.table::fread(
     input = "data-raw/ADNIMERGE_20Sep2024.csv",
-    sep = ",") |> tibble::tibble() |>
+    sep = ","
+) |>
+    tibble::tibble() |>
     dplyr::filter(VISCODE == "bl")
 
 All_metabo <- All_Metabo |>
@@ -211,12 +235,14 @@ raw_data1 <- raw_data[-c(1:9)] |>
     dplyr::mutate_at(colnames(raw_data[-c(1:9)]), as.numeric)
 raw_data1 <- raw_data1[sapply(raw_data1, is.numeric)]
 
-dplyr::bind_rows(raw_data1, cbind(FIA_QC_samples |> dplyr::select(-1),
-                         UPLC_QC_samples |> dplyr::select(-1)))
+dplyr::bind_rows(raw_data1, cbind(
+    FIA_QC_samples |> dplyr::select(-1),
+    UPLC_QC_samples |> dplyr::select(-1)
+))
 
-mypca <-  prcomp(raw_data1)
+mypca <- prcomp(raw_data1)
 pca <- cbind(raw_data[1:9], mypca$x[], 1:2)
-ggplot(pca, aes(PC1,PC2, col = DX_bl, fill = DX_bl)) +
+ggplot(pca, aes(PC1, PC2, col = DX_bl, fill = DX_bl)) +
     stat_ellipse(geom = "polygon", col = "black", alpha = 0.5) +
     geom_point(shape = 21, col = "black")
 
@@ -233,44 +259,119 @@ coul <- rainbow(length(unique(pca_coords$Cohort)))
 color_map <- setNames(coul, levels(pca_coords$Cohort))
 pca_coords$Color <- color_map[pca_coords$Cohort]
 
-axis = list(showline = FALSE, zeroline = FALSE, gridcolor = '#ffff',
-            ticklen = 4, titlefont = list(size = 13))
+axis <- list(
+    showline = FALSE, zeroline = FALSE, gridcolor = "#ffff",
+    ticklen = 4, titlefont = list(size = 13)
+)
 
 
 library(plotly)
 splom_plot <- plot_ly(
     data = pca_coords,
-    type = 'splom',
+    type = "splom",
     dimensions = list(
         list(label = paste("PC1: (", round(acp$eig[1, 2], 2), "%)", sep = ""), values = ~Dim1),
         list(label = paste("PC2: (", round(acp$eig[2, 2], 2), "%)", sep = ""), values = ~Dim2),
         list(label = paste("PC3: (", round(acp$eig[3, 2], 2), "%)", sep = ""), values = ~Dim3),
         list(label = paste("PC4: (", round(acp$eig[4, 2], 2), "%)", sep = ""), values = ~Dim4)
     ),
-    color = ~pca_coords$Cohort, colors = c('#636EFA','#EF553B'),
-    text = ~paste("sample: ", sampleID)
+    color = ~ pca_coords$Cohort, colors = c("#636EFA", "#EF553B"),
+    text = ~ paste("sample: ", sampleID)
 ) %>%
     layout(
         title = "Scatterplot Matrix of PCA 4 Dimensions",
         dragmode = "select",
-        legend = list(title = list(text = 'Group')),
-        hovermode = 'closest',
-        dragmode = 'select',
-        plot_bgcolor = 'rgba(240,240,240, 0.95)',
-        xaxis = list(domain = NULL, showline = F, zeroline = F, gridcolor = '#ffff', ticklen = 4),
-        yaxis = list(domain = NULL, showline = F, zeroline = F, gridcolor = '#ffff', ticklen = 4),
+        legend = list(title = list(text = "Group")),
+        hovermode = "closest",
+        dragmode = "select",
+        plot_bgcolor = "rgba(240,240,240, 0.95)",
+        xaxis = list(domain = NULL, showline = F, zeroline = F, gridcolor = "#ffff", ticklen = 4),
+        yaxis = list(domain = NULL, showline = F, zeroline = F, gridcolor = "#ffff", ticklen = 4),
         xaxis2 = axis,
         xaxis3 = axis,
         xaxis4 = axis,
         yaxis2 = axis,
         yaxis3 = axis,
         yaxis4 = axis
-    )  %>% style(diagonal = list(visible = FALSE))
+    ) %>%
+    style(diagonal = list(visible = FALSE))
 
 splom_plot
 
+# Metabolite Class Regex Patterns ====
+# Provide regex patterns to extract or classify the columns (metabolite names)
+# into Biocrates metabolite classes.
+library(dplyr)
+library(stringr)
+
+classify_metabolite <- function(met) {
+    if (str_detect(met, "^C\\d+(:\\d+)?(-DC|(-M)?-DC-M|-OH|-M-DC)?(\\s*\\(.*\\))?$")) {
+        return("Acylcarnitines")
+    } else if (str_detect(met, "^Cer\\(.*\\)$")) {
+        return("Ceramides")
+    } else if (str_detect(met, "^CE\\(\\d+:\\d+\\)$")) {
+        return("Cholesteryl Esters")
+    } else if (str_detect(met, "^DG\\([^)]+\\)$") || str_detect(met, "^DG-O?\\([^)]+\\)$")) {
+        return("Diglycerides")
+    } else if (str_detect(met, "^TG\\([^)]+\\)$")) {
+        return("Triglycerides")
+    } else if (str_detect(met, "^PC (aa|ae) C\\d+:\\d+$")) {
+        return("Phosphatidylcholines")
+    } else if (str_detect(met, "^lysoPC a C\\d+:\\d+$")) {
+        return("Lysophosphatidylcholines")
+    } else if (str_detect(met, "^SM( \\(OH\\))? C\\d+:\\d+$")) {
+        return("Sphingomyelins")
+    } else if (str_detect(met, "^HexCer\\(.*\\)$")) {
+        return("Hexosylceramides")
+    } else if (str_detect(met, "^Hex2Cer\\(.*\\)$")) {
+        return("Dihexosylceramides")
+    } else if (str_detect(met, "^Hex3Cer\\(.*\\)$")) {
+        return("Trihexosylceramides")
+    } else if (str_detect(met, "^FA\\(\\d+:\\d+\\)$") || met %in% c("DHA", "EPA")) {
+        return("Fatty Acids")
+    } else if (str_detect(met, "^(Ala|Arg|Asn|Asp|Cys|Gln|Glu|Gly|His|Ile|Leu|Lys|Met|Phe|Pro|Ser|Thr|Trp|Tyr|Val|AA)$")) {
+        return("Amino Acids")
+    } else if (str_detect(met, "^(1-Met-His|3-Met-His|5-AVA|AABA|Ac-Orn|ADMA|alpha-AAA|Anserine|BABA|Betaine|Carnosine|Cit|Creatinine|Cystine|DOPA|HArg|HCys|Kynurenine|Met-SO|Nitro-Tyr|Orn|PheAlaBetaine|ProBetaine|Sarcosine|SDMA|t4-OH-Pro|c4-OH-Pro|Taurine|TrpBetaine|beta-Ala)$")) {
+        return("Amino Acid-related")
+    } else if (str_detect(met, "^(Dopamine|GABA|Histamine|PEA|Putrescine|Serotonin|Spermidine|Spermine)$")) {
+        return("Biogenic Amines")
+    } else if (str_detect(met, "^(CA|CDCA|DCA|GCA|GCDCA|GDCA|GLCA|GLCAS|GUDCA|TCA|TCDCA|TDCA|TLCA|TMCA)$")) {
+        return("Bile Acids")
+    } else if (str_detect(met, "^(AconAcid|DiCA\\(\\d+:\\d+\\)|HipAcid|Lac|OH-GlutAcid|Suc|AbsAcid)$")) {
+        return("Carboxylic Acids")
+    } else if (str_detect(met, "^(3-IAA|3-IPA|Ind-SO4|Indole)$")) {
+        return("Indoles and Derivatives")
+    } else if (str_detect(met, "^(Cortisol|Cortisone|DHEAS)$")) {
+        return("Hormones")
+    } else if (str_detect(met, "^(Hypoxanthine|Xanthine)$")) {
+        return("Nucleobases and Related")
+    } else if (str_detect(met, "^TMAO$")) {
+        return("Amine Oxides")
+    } else if (str_detect(met, "^Trigonelline$")) {
+        return("Alkaloids")
+    } else if (str_detect(met, "^p-Cresol-SO4$")) {
+        return("Cresols")
+    } else if (str_detect(met, "^H1$")) {
+        return("Carbohydrates and Related")
+    } else if (str_detect(met, "^Choline$")) {
+        return("Vitamins and Cofactors")
+    } else {
+        return("Unknown")
+    }
+}
+
+all_features <- ADNIMetabo::reformatted_data_all |>
+    dplyr::select(-c("RID", "VISCODE", "Plate")) |>
+    colnames()
+
+metabolite_table <- tibble(
+    Metabolite = all_features,
+    Class = sapply(all_features, classify_metabolite)
+)
+metabolite_table |> filter(Class == "Unknown")
+print(head(metabolite_table))
+
+write.csv(metabolite_table, "metabolite_class_table.csv", row.names = FALSE)
 
 
-
-
-
+usethis::use_data(metabolite_classes, overwrite = TRUE)

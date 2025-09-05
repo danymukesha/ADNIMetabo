@@ -1,5 +1,5 @@
 ---
-title: 'ADNI Baseline Analysis: Alzheimer''s Disease vs Cognitively Normal'
+title: 'ADNI Baseline Analysis: AD vs CN'
 # subtitle: "Case-Control Study"
 author: "Dany MUKESHA"
 date: "`r Sys.Date()`"
@@ -32,7 +32,9 @@ knitr::opts_chunk$set(
 
 library(tidyverse)
 library(ggplot2)
+library(ggrepel)
 library(gridExtra)
+library(grid)
 library(corrplot)
 library(tableone)
 library(RColorBrewer)
@@ -46,10 +48,19 @@ library(car)
 library(effsize)
 devtools::load_all()
 
-theme_set(theme_minimal() + 
-          theme(plot.title = element_text(hjust = 0.5, face = "bold"),
-                legend.position = "bottom"))
+theme_set(theme_bw() + 
+          theme(plot.title = element_text(hjust = 0.5, face = "bold",
+                                          size = 14, vjust = 2.4),
+                legend.position = "bottom",
+                strip.text = element_text(face = "bold", size = 12.5),
+                axis.text = element_text(size = 11, face = "plain"),
+                axis.title = element_text(size = 12)))
 
+my_comparisons <- list( c("AD", "CN"))
+
+stat_comp <- stat_compare_means(label = "p.signif", method = "t.test",
+                                vjust = 0.6, ref.group = "0.00001", 
+                                comparisons = my_comparisons) 
 custom_colors <- c("#2E86AB", "#A23B72", "#F18F01", "#C73E1D")
 ```
 
@@ -61,6 +72,11 @@ The study includes demographic, clinical, neuropsychological, and
 biomarker comparisons.
 
 # Data Preparation
+
+```{r get-rids-with-metabo-data, eval=TRUE, include=FALSE}
+data <- data.table::fread("03_EffectsAdjusted.csv", sep = ",") 
+RIDs_with_metabo_data <- data$RID
+```
 
 ```{r data-prep}
 # baseline subset for case-control analysis
@@ -81,19 +97,14 @@ baseline_data <- adnim %>%
       PTEDUCAT >= 16 ~ "College+",
       TRUE ~ "Unknown"
     ),
-    # Convert biomarker strings to numeric
     ABETA_numeric = as.numeric(ifelse(ABETA_bl == "", NA, ABETA_bl)),
     TAU_numeric = as.numeric(ifelse(TAU_bl == "", NA, TAU_bl))
   ) %>%
-  select(-ABETA_bl, -TAU_bl, -ABETA, -TAU) # Remove string versions
+  dplyr::filter(RID %in% RIDs_with_metabo_data) %>%
+  select(-ABETA_bl, -TAU_bl, -ABETA, -TAU) 
 
 cat("Sample Sizes:\n")
 table(baseline_data$Group)
-```
-
-```{r get-rids-with-metabo-data, eval=FALSE, include=FALSE}
-data <- data.table::fread("03_EffectsAdjusted.csv", sep = ",") 
-RIDs_with_metabo_data <- data$RID
 ```
 
 # Demographic Characteristics
@@ -163,7 +174,7 @@ grid.arrange(p1, p2, p3, p4, ncol = 2)
 ```{r cognitive-table}
 cog_vars <- c("MMSE_bl", "ADAS11_bl", "ADAS13_bl", "ADASQ4_bl", 
               "LDELTOTAL_BL", "RAVLT_immediate_bl", "RAVLT_learning_bl", 
-              "RAVLT_forgetting_bl", "MOCA_bl", "CDRSB_bl")
+              "RAVLT_forgetting_bl", "MOCA_bl", "CDRSB_bl", "DIGITSCOR_bl", "FAQ_bl")
 
 tab2 <- CreateTableOne(vars = cog_vars, 
                        strata = "Group", 
@@ -195,19 +206,30 @@ cog_data <- baseline_data %>%
       Test == "RAVLT_forgetting_bl" ~ "RAVLT Forgetting",
       Test == "MOCA_bl" ~ "MOCA",
       Test == "CDRSB_bl" ~ "CDR-SB",
+      Test == "DIGITSCOR_bl" ~ "Digit Symbol Substitution",
+      Test == "FAQ_bl" ~ "FAQ",
       TRUE ~ Test
     )
   )
 
-ggplot(cog_data, aes(x = Group, y = Score, fill = Group)) +
+my_comparisons <- list( c("AD", "CN"))
+
+p <- ggplot(cog_data, aes(x = Group, y = Score, fill = Group)) +
   geom_boxplot(alpha = 0.7) +
   geom_jitter(width = 0.2, alpha = 0.3, size = 0.5) +
   scale_fill_manual(values = custom_colors[1:2]) +
-  facet_wrap(~ Test_Label, scales = "free_y", ncol = 5) +
-  labs(title = "Cognitive Test Scores by Group", 
-       y = "Score") +
-  theme(legend.position = "none", 
-        strip.text = element_text(face = "bold"))
+  facet_wrap(~ Test_Label, scales = "free_y", ncol = 4) +
+  labs(title = "Cognitive Test Scores by Diagnosis", 
+       y = "Score", x = "Diagnosis") +
+  theme(legend.position = "none", plot.title = element_text(size = 22, vjust = 1)) +
+  # stat_compare_means(comparisons = my_comparisons) +
+  # stat_compare_means(label.y = 45) +
+  # stat_compare_means(method = "anova", label.y = 40) +      # Add global p-value
+  stat_compare_means(label = "p.signif", method = "t.test",vjust = 0.6,
+                     ref.group = "0.00001", comparisons = my_comparisons) 
+p
+ggsave("results_baseline_AD-vs-CN/cog_tests_by_dx.png", 
+       p, height = 10, width = 14, dpi = 300)
 ```
 
 ## Effect Sizes for Cognitive Tests
@@ -226,7 +248,7 @@ effect_sizes <- cog_data %>%
   arrange(desc(abs(cohens_d)))
 
 # Plot effect sizes
-ggplot(effect_sizes, aes(x = reorder(Test_Label, abs(cohens_d)), y = cohens_d)) +
+p <- ggplot(effect_sizes, aes(x = reorder(Test_Label, abs(cohens_d)), y = cohens_d)) +
   geom_col(aes(fill = abs(cohens_d) > 0.8), alpha = 0.8) +
   geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.2) +
   coord_flip() +
@@ -238,7 +260,17 @@ ggplot(effect_sizes, aes(x = reorder(Test_Label, abs(cohens_d)), y = cohens_d)) 
   geom_hline(yintercept = c(-0.8, -0.5, -0.2, 0.2, 0.5, 0.8), 
              linetype = "dashed", alpha = 0.5)
 
-kable(effect_sizes, digits = 3, 
+p
+ggsave("results_baseline_AD-vs-CN/cog_tests_effect_sizes.png", 
+       p, height = 10, width = 14, dpi = 300)
+
+effect_sizes_formatted <- effect_sizes %>%
+    arrange(desc(abs(cohens_d))) %>%
+    mutate(CI = sprintf("[%.2f, %.2f]", ci_lower, ci_upper),
+           d = sprintf("%.2f", cohens_d)) %>%
+    select(Test = Test_Label, `Cohen's d` = d, `95% CI` = CI)
+
+kable(effect_sizes_formatted, digits = 3, 
       caption = "Effect Sizes for Cognitive Test Differences") %>%
   kable_styling(bootstrap_options = c("striped", "hover"))
 ```
@@ -279,25 +311,541 @@ bio_data <- baseline_data %>%
 
 p1 <- ggplot(bio_data, aes(x = Group, y = Value, fill = Group)) +
   geom_boxplot(alpha = 0.7) +
-  geom_jitter(width = 0.2, alpha = 0.3, size = 0.5) +
+  geom_jitter(width = 0.2, alpha = 0.3, size = 2) +
   scale_fill_manual(values = custom_colors[1:2]) +
   facet_wrap(~ Biomarker_Label, scales = "free_y", ncol = 2) +
-  labs(title = "Biomarker Levels by Group", y = "Value") +
-  theme(legend.position = "none")
+  labs(title = "Biomarker Levels by Diagnosis", 
+       y = "Value", x = "Diagnosis") +
+  theme(legend.position = "none", plot.title = element_text(size = 22, vjust = 1)) +
+  stat_comp
 
 print(p1)
+ggsave("results_baseline_AD-vs-CN/csf_biomarkers_by_dx.png", 
+       p1, height = 8, width = 12, dpi = 300)
+```
 
+
+```{r biomarker-plots_corr, fig.height=10, fig.width=10}
 bio_corr_data <- baseline_data %>%
   select(FDG_bl, AV45_bl, ABETA_numeric, TAU_numeric) %>%
   rename("FDG-PET" = FDG_bl, 
          "Amyloid PET" = AV45_bl,
-         "CSF Aβ42" = ABETA_numeric,
+         "CSF A\u03B242" = ABETA_numeric,
          "CSF Tau" = TAU_numeric)
 
-corrplot(cor(bio_corr_data, use = "complete.obs"), 
-         method = "color", type = "upper", 
-         title = "Biomarker Correlations",
+# png("results_baseline_AD-vs-CN/biomarker_corrplot.png", width = 1200, height = 1000, res = 150)
+corrplot(
+  cor(bio_corr_data, use = "complete.obs"), method = "color",
+  order = "hclust", addCoef.col = "black", tl.col = "black", tl.srt = 45,           
+  number.cex = 1.4, tl.cex = 1.2, sig.level = 0.01, cex.main = 1.8,       
+  insig = "blank", diag = FALSE, title = "Biomarker Correlations",
+  mar = c(1, 1, 3, 1)    # margin: bottom, left, top, right
+)
+# dev.off()
+```
+
+## Effect Sizes for Biomarkers
+
+```{r effect-size_bios}
+# Calculate effect sizes (Cohen's d)
+bio_effect_sizes <- bio_data %>%
+  group_by(Biomarker_Label) %>%
+  summarise(
+    cohens_d = cohen.d(Value ~ Group, na.rm = TRUE)$estimate,
+    ci_lower = cohen.d(Value ~ Group, na.rm = TRUE)$conf.int[1],
+    ci_upper = cohen.d(Value ~ Group, na.rm = TRUE)$conf.int[2],
+    p_value = t.test(Value ~ Group, na.rm = TRUE)$p.value,
+    .groups = 'drop'
+  ) %>%
+  arrange(desc(abs(cohens_d)))
+
+# Plot effect sizes
+p <- ggplot(bio_effect_sizes, aes(x = reorder(Biomarker_Label, abs(cohens_d)), y = cohens_d)) +
+  geom_col(aes(fill = abs(cohens_d) > 0.8), alpha = 0.8) +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.2) +
+  coord_flip() +
+  scale_fill_manual(values = c("FALSE" = custom_colors[1], "TRUE" = custom_colors[2]),
+                   name = "Large Effect\n(|d| > 0.8)") +
+  labs(title = "Effect Sizes (Cohen's d) for Biomarkers Values", 
+       subtitle = "AD vs CN Comparison",
+       x = "Cognitive Test", y = "Cohen's d (95% CI)") +
+  geom_hline(yintercept = c(-0.8, -0.5, -0.2, 0.2, 0.5, 0.8), 
+             linetype = "dashed", alpha = 0.5)
+
+p
+ggsave("results_baseline_AD-vs-CN/biomarkers_effect_sizes.png", 
+       p, height = 10, width = 14, dpi = 300)
+
+bio_effect_sizes_formatted <- bio_effect_sizes %>%
+    arrange(desc(abs(cohens_d))) %>%
+    mutate(CI = sprintf("[%.2f, %.2f]", ci_lower, ci_upper),
+           d = sprintf("%.2f", cohens_d)) %>%
+    select(Test = Biomarker_Label, `Cohen's d` = d, `95% CI` = CI)
+
+kable(bio_effect_sizes_formatted, digits = 3, 
+      caption = "Effect Sizes for Biomarkers Level Differences") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+# Neuroimaging Analysis: Structural MRI
+
+## Overview of Neuroimaging Data
+
+The ADNI dataset also includes structural MRI measurements derived from
+FreeSurfer analysis, providing detailed information about brain regional
+volumes and cortical thickness measures.
+
+```{r imaging-data-prep}
+# add imaging variables to baseline data
+baseline_data <- baseline_data %>%
+  mutate(
+    # first: normalize brain volumes by ICV to account for head size differences
+    # second: create atrophy indices (higher values = more atrophy)
+    # thirf: we perform entricle-to-brain ratio (VBR)
+    Ventricles_norm = Ventricles_bl / ICV_bl * 1000,
+    Hippocampus_norm = Hippocampus_bl / ICV_bl * 1000,
+    WholeBrain_norm = WholeBrain_bl / ICV_bl * 1000,
+    Entorhinal_norm = Entorhinal_bl / ICV_bl * 1000,
+    Fusiform_norm = Fusiform_bl / ICV_bl * 1000,
+    MidTemp_norm = MidTemp_bl / ICV_bl * 1000,
+    
+    Hippocampal_Atrophy = 1 - (Hippocampus_norm / max(Hippocampus_norm, na.rm = TRUE)),
+    Entorhinal_Atrophy = 1 - (Entorhinal_norm / max(Entorhinal_norm, na.rm = TRUE)),
+    
+    VBR = Ventricles_bl / WholeBrain_bl
+  )
+
+imaging_summary <- baseline_data %>%
+  summarise(
+    across(c(Ventricles_bl, Hippocampus_bl, WholeBrain_bl, 
+             Entorhinal_bl, Fusiform_bl, MidTemp_bl, ICV_bl), 
+           ~sum(!is.na(.)), .names = "n_{.col}"),
+    .by = Group
+  )
+
+kable(imaging_summary, caption = "Structural MRI Data Availability") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+## Table 4: Structural MRI Comparisons
+
+```{r imaging-table}
+imaging_vars <- c("ICV_bl", "Ventricles_norm", "Hippocampus_norm", "WholeBrain_norm", 
+                  "Entorhinal_norm", "Fusiform_norm", "MidTemp_norm", "VBR")
+
+tab4 <- CreateTableOne(vars = imaging_vars, 
+                       strata = "Group", 
+                       data = baseline_data,
+                       test = TRUE)
+
+kable(print(tab4, printToggle = FALSE), 
+      caption = "Table 4: Structural MRI Measurements (ICV-normalized)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+## Regional Brain Volume Comparisons
+
+```{r regional-volumes, fig.height=10, fig.width=14}
+regional_data <- baseline_data %>%
+  select(Group, Ventricles_norm, Hippocampus_norm, WholeBrain_norm, 
+         Entorhinal_norm, Fusiform_norm, MidTemp_norm) %>%
+  gather(key = "Region", value = "Volume", -Group) %>%
+  filter(!is.na(Volume)) %>%
+  mutate(
+    Region_Label = case_when(
+      Region == "Ventricles_norm" ~ "Ventricles",
+      Region == "Hippocampus_norm" ~ "Hippocampus",
+      Region == "WholeBrain_norm" ~ "Whole Brain",
+      Region == "Entorhinal_norm" ~ "Entorhinal Cortex",
+      Region == "Fusiform_norm" ~ "Fusiform Gyrus",
+      Region == "MidTemp_norm" ~ "Middle Temporal",
+      TRUE ~ Region
+    ),
+    Region_Category = case_when(
+      Region %in% c("Hippocampus_norm", "Entorhinal_norm") ~ "Memory-Related",
+      Region %in% c("Fusiform_norm", "MidTemp_norm") ~ "Temporal Cortex",
+      Region == "WholeBrain_norm" ~ "Global Measure",
+      Region == "Ventricles_norm" ~ "CSF Space",
+      TRUE ~ "Other"
+    )
+  )
+
+p1 <- ggplot(regional_data, aes(x = Group, y = Volume, fill = Group)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+  geom_jitter(width = 0.2, alpha = 0.2, size = 1.5) +
+  scale_fill_manual(values = custom_colors[1:2]) +
+  facet_wrap(~ Region_Label, scales = "free_y", ncol = 3) +
+  labs(title = "Regional Brain Volumes by Diagnostic Group", 
+       subtitle = "Volumes normalized by intracranial volume (ICV)",
+       y = "Normalized Volume (per 1000 ICV units)") +
+  theme(legend.position = "none", 
+        strip.text = element_text(face = "bold", size = 15),
+        axis.text = element_text(size = 14, face = "plain"),
+        plot.title = element_text(size = 22, vjust = 1),
+        axis.title = element_text(size = 14)) +
+  stat_compare_means(label = "p.signif", method = "t.test",
+                     ref.group = "0.00001", comparisons = my_comparisons) 
+
+print(p1)
+ggsave("results_baseline_AD-vs-CN/brain_region_by_dx.png", 
+       p1, height = 8, width = 12, dpi = 300)
+
+# effect sizes for brain regions
+regional_effects <- regional_data %>%
+  group_by(Region_Label, Region_Category) %>%
+  summarise(
+    cohens_d = cohen.d(Volume ~ Group, na.rm = TRUE)$estimate,
+    ci_lower = cohen.d(Volume ~ Group, na.rm = TRUE)$conf.int[1],
+    ci_upper = cohen.d(Volume ~ Group, na.rm = TRUE)$conf.int[2],
+    p_value = t.test(Volume ~ Group, na.rm = TRUE)$p.value,
+    .groups = 'drop'
+  ) %>%
+  arrange(desc(abs(cohens_d)))
+
+p2 <- ggplot(regional_effects, aes(x = reorder(Region_Label, abs(cohens_d)),
+                                   y = cohens_d)) +
+  geom_col(aes(fill = Region_Category), alpha = 0.8) +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.2) +
+  coord_flip() +
+  scale_fill_viridis_d(name = "Region Category") +
+  labs(title = "Effect Sizes for Regional Brain Volume Differences", 
+       subtitle = "AD vs CN Comparison (Cohen's d with 95% CI)",
+       x = "Brain Region", y = "Cohen's d") +
+  geom_hline(yintercept = c(-1.2, -0.8, -0.5, -0.2, 0, 0.2, 0.5, 0.8, 1.2), 
+             linetype = "dashed", alpha = 0.3) +
+  theme(strip.text = element_text(face = "bold", size = 15),
+        axis.text = element_text(size = 14, face = "plain"),
+        plot.title = element_text(size = 22, vjust = 1),
+        axis.title = element_text(size = 13), 
+        legend.text = element_text(size = 10))
+
+print(p2)
+ggsave("results_baseline_AD-vs-CN/brain_region_effect_sizes.png", 
+       p2, height = 6, width = 12, dpi = 300)
+
+regional_effects_formatted <- regional_effects %>%
+    arrange(desc(abs(cohens_d))) %>%
+    mutate(CI = sprintf("[%.2f, %.2f]", ci_lower, ci_upper),
+           d = sprintf("%.2f", cohens_d)) %>%
+    select(Test = Region_Label, `Cohen's d` = d, `95% CI` = CI)
+
+kable(regional_effects_formatted, digits = 3, 
+      caption = "Effect Sizes for Regional Brain Volume Differences") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+## Advanced Neuroimaging Analysis
+
+### Brain Volume Ratios and Composite Scores
+
+```{r brain-ratios, fig.height=8, fig.width=12}
+# we meaningful brain ratios
+baseline_data <- baseline_data %>%
+  mutate(
+    # first: hippocampus to total brain ratio
+    # second: we do entorhinal to hippocampus ratio
+    # third: temporal lobe composite (fusiform + middle temporal + entorhinal + hippocampus)
+    # forth: we calculate atrophy severity index combining key AD regions
+    Hip_to_Brain = Hippocampus_bl / WholeBrain_bl,
+    
+    Ento_to_Hip = Entorhinal_bl / Hippocampus_bl,
+    
+    Temporal_Composite = (Fusiform_norm + MidTemp_norm + Entorhinal_norm + Hippocampus_norm),
+    
+    AD_Atrophy_Index = scale(Hippocampal_Atrophy)[,1] + 
+                      scale(Entorhinal_Atrophy)[,1] + 
+                      scale(VBR)[,1]
+  )
+
+ratio_data <- baseline_data %>%
+  select(Group, Hip_to_Brain, Ento_to_Hip, VBR, AD_Atrophy_Index) %>%
+  gather(key = "Ratio", value = "Value", -Group) %>%
+  filter(!is.na(Value)) %>%
+  mutate(
+    Ratio_Label = case_when(
+      Ratio == "Hip_to_Brain" ~ "Hippocampus/Brain Ratio",
+      Ratio == "Ento_to_Hip" ~ "Entorhinal/Hippocampus Ratio", 
+      Ratio == "VBR" ~ "Ventricle/Brain Ratio",
+      Ratio == "AD_Atrophy_Index" ~ "AD Atrophy Index",
+      TRUE ~ Ratio
+    )
+  )
+
+p <- ggplot(ratio_data, aes(x = Group, y = Value, fill = Group)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.2, alpha = 0.3, size = 0.5) +
+  scale_fill_manual(values = custom_colors[1:2]) +
+  facet_wrap(~ Ratio_Label, scales = "free_y", ncol = 2) +
+  labs(title = "Brain Volume Ratios and Composite Measures", 
+       y = "Ratio/Index Value") +
+  theme(legend.position = "none", 
+        strip.text = element_text(face = "bold", size = 12.5),
+        axis.text = element_text(size = 11, face = "plain"),
+        plot.title = element_text(size = 13, vjust = 2.4),
+        axis.title = element_text(size = 12)) +
+  stat_compare_means(label = "p.signif", method = "t.test",
+                     ref.group = "0.00001", comparisons = my_comparisons) 
+
+ggsave("results_baseline_AD-vs-CN/brain_region_ratios.png", 
+       p, height = 7, width = 10, dpi = 300)
+
+# statistical tests for ratios
+ratio_tests <- ratio_data %>%
+  group_by(Ratio_Label) %>%
+  summarise(
+    AD_mean = mean(Value[Group == "AD"], na.rm = TRUE),
+    CN_mean = mean(Value[Group == "CN"], na.rm = TRUE),
+    p_value = t.test(Value ~ Group, na.rm = TRUE)$p.value,
+    cohens_d = cohen.d(Value ~ Group, na.rm = TRUE)$estimate,
+    ci_lower = cohen.d(Value ~ Group, na.rm = TRUE)$conf.int[1],
+    ci_upper = cohen.d(Value ~ Group, na.rm = TRUE)$conf.int[2],
+    .groups = 'drop'
+  )
+
+kable(ratio_tests, digits = 4, 
+      caption = "Statistical Comparison of Brain Volume Ratios") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+### Correlation Analysis: Brain Structure and Cognition
+
+```{r brain-cognition-correlation, fig.height=10, fig.width=14}
+# we do correlation between brain measures and cognitive scores
+brain_cog_data <- baseline_data %>%
+  select(Group, MMSE_bl, ADAS11_bl, ADAS13_bl, LDELTOTAL_BL, RAVLT_immediate_bl,
+         Hippocampus_norm, Entorhinal_norm, Fusiform_norm, MidTemp_norm, 
+         VBR, AD_Atrophy_Index) %>%
+  na.omit()
+
+# corr. matrix
+cor_matrix <- cor(brain_cog_data %>% select(-Group), use = "complete.obs")
+
+corrplot(cor_matrix, method = "color", type = "upper", 
+         order = "hclust", tl.cex = 0.8, tl.col = "black",
+         title = "Correlations: Brain Structure and Cognitive Measures",
          mar = c(0,0,2,0))
+
+# we show scatter plots for key relationships
+key_relationships <- data.frame(
+  MMSE = brain_cog_data$MMSE_bl,
+  ADAS11 = brain_cog_data$ADAS11_bl,
+  Hippocampus = brain_cog_data$Hippocampus_norm,
+  Entorhinal = brain_cog_data$Entorhinal_norm,
+  VBR = brain_cog_data$VBR,
+  Group = brain_cog_data$Group
+)
+
+# MMSE vs Hippocampus
+p1 <- ggplot(key_relationships, aes(x = Hippocampus, y = MMSE, color = Group)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE) +
+  scale_color_manual(values = custom_colors[1:2]) +
+  labs(title = "MMSE Score vs Hippocampal Volume",
+       x = "Hippocampal Volume (ICV-normalized)",
+       y = "MMSE Score") +
+  theme(legend.position = "bottom")
+
+# ADAS11 vs Entorhinal
+p2 <- ggplot(key_relationships, aes(x = Entorhinal, y = ADAS11, color = Group)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE) +
+  scale_color_manual(values = custom_colors[1:2]) +
+  labs(title = "ADAS-11 Score vs Entorhinal Volume",
+       x = "Entorhinal Volume (ICV-normalized)", 
+       y = "ADAS-11 Score") +
+  theme(legend.position = "bottom")
+
+# MMSE vs VBR
+p3 <- ggplot(key_relationships, aes(x = VBR, y = MMSE, color = Group)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE) +
+  scale_color_manual(values = custom_colors[1:2]) +
+  labs(title = "MMSE Score vs Ventricle-to-Brain Ratio",
+       x = "Ventricle-to-Brain Ratio",
+       y = "MMSE Score") +
+  theme(legend.position = "bottom")
+
+# Combined atrophy index vs cognition
+p4 <- ggplot(brain_cog_data, aes(x = AD_Atrophy_Index, y = MMSE_bl, color = Group)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE) +
+  scale_color_manual(values = custom_colors[1:2]) +
+  labs(title = "MMSE Score vs AD Atrophy Index",
+       x = "AD Atrophy Index (standardized)",
+       y = "MMSE Score") +
+  theme(legend.position = "bottom")
+
+get_legend <- function(my_plot) {
+  tmp <- ggplotGrob(my_plot)
+  legend <- gtable::gtable_filter(tmp, "guide-box")
+  return(legend)
+}
+legend <- get_legend(p1 + theme(legend.position = "bottom"))
+p1_nolegend <- p1 + theme(legend.position = "none")
+p2_nolegend <- p2 + theme(legend.position = "none")
+p3_nolegend <- p3 + theme(legend.position = "none")
+p4_nolegend <- p4 + theme(legend.position = "none")
+
+combined <- grid.arrange(x,
+  arrangeGrob(p1_nolegend, p2_nolegend, p3_nolegend, p4_nolegend, ncol = 2),
+  legend,
+  nrow = 2,
+  heights = c(12, 1)  
+)
+
+ggsave("results_baseline_AD-vs-CN/brain_region_vs_cognitive.png", 
+       combined, height = 9, width = 12, dpi = 300)
+```
+
+### Machine Learning Classification using Neuroimaging
+
+```{r ml-imaging, fig.height=8, fig.width=12}
+ml_data <- baseline_data %>%
+  select(Group, AGE, Male, PTEDUCAT, APOE4_1, APOE4_2,
+         Hippocampus_norm, Entorhinal_norm, Fusiform_norm, MidTemp_norm,
+         Ventricles_norm, VBR, AD_Atrophy_Index, 
+         bio_vars, CDRSB) %>%
+  mutate(AD = ifelse(Group == "AD", 1, 0)) %>%
+  na.omit()
+
+# data from imaging-only model
+imaging_model <- glm(AD ~ Hippocampus_norm + Entorhinal_norm + Fusiform_norm + 
+                     MidTemp_norm + Ventricles_norm + VBR,
+                     data = ml_data, family = "binomial")
+
+# combined model (demographics + imaging)
+combined_model <- glm(AD ~ AGE + Male + PTEDUCAT + APOE4_1 + APOE4_2 +
+                      Hippocampus_norm + Entorhinal_norm + Fusiform_norm + 
+                      MidTemp_norm + Ventricles_norm + VBR,
+                      data = ml_data, family = "binomial")
+
+# CSF + PET model
+bio_model <- glm(AD ~ FDG_bl + AV45_bl + ABETA_numeric + TAU_numeric + ICV_bl,
+                      data = ml_data, family = "binomial")
+
+# CDR model
+cdr_model <- glm(AD ~ CDRSB,
+                      data = ml_data, family = "binomial")
+
+# comparing models
+imaging_results <- tidy(imaging_model) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(
+    OR = exp(estimate),
+    CI_lower = exp(estimate - 1.96 * std.error),
+    CI_upper = exp(estimate + 1.96 * std.error),
+    Model = "Imaging Only"
+  )
+
+combined_results <- tidy(combined_model) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(
+    OR = exp(estimate),
+    CI_lower = exp(estimate - 1.96 * std.error),
+    CI_upper = exp(estimate + 1.96 * std.error),
+    Model = "Combined"
+  )
+
+imaging_auc <- pROC::auc(pROC::roc(ml_data$AD, predict(imaging_model, type = "response")))
+combined_auc <- pROC::auc(pROC::roc(ml_data$AD, predict(combined_model, type = "response")))
+bio_auc <- pROC::auc(pROC::roc(ml_data$AD, predict(bio_model, type = "response")))
+cdr_auc <- pROC::auc(pROC::roc(ml_data$AD, predict(cdr_model, type = "response")))
+
+cat("Model Performance (AUC):\n")
+cat("Imaging Only:", round(imaging_auc, 3), "\n")
+cat("Combined Model:", round(combined_auc, 3), "\n")
+cat("CSF + PET Model:", round(bio_auc, 3), "\n")
+cat("CDR-SB Model:", round(cdr_auc, 3), "\n")
+
+roc_imaging <- pROC::roc(ml_data$AD, predict(imaging_model, type = "response"))
+roc_combined <- pROC::roc(ml_data$AD, predict(combined_model, type = "response"))
+roc_cdr <- pROC::roc(ml_data$AD, predict(cdr_model, type = "response"))
+roc_bio <- pROC::roc(ml_data$AD, predict(bio_model, type = "response"))
+
+
+# roc_data <- data.frame(
+#   Sensitivity = c(roc_imaging$sensitivities, roc_combined$sensitivities),
+#   Specificity = c(1 - roc_imaging$specificities, 1 - roc_combined$specificities),
+#   Model = c(rep("Imaging Only", length(roc_imaging$sensitivities)),
+#             rep("Combined", length(roc_combined$sensitivities)))
+# )
+
+roc_df_imaging <- data.frame(Sensitivity = roc_imaging$sensitivities, 
+  Specificity = 1 - roc_imaging$specificities, 
+  Model = paste0("MRI Imaging (AUC = ", round(imaging_auc, 3), ")"))
+
+roc_df_combined <- data.frame(Sensitivity = roc_combined$sensitivities,
+  Specificity = 1 - roc_combined$specificities, 
+  Model = paste0("Demographics + MRI (AUC = ", round(combined_auc, 3), ")"))
+
+roc_df_cdr <- data.frame(Sensitivity = roc_cdr$sensitivities,
+  Specificity = 1 - roc_cdr$specificities, 
+  Model = paste0("CDR-SB (AUC = ", round(cdr_auc, 3), ")"))
+
+roc_df_bio <- data.frame(Sensitivity = roc_bio$sensitivities,
+  Specificity = 1 - roc_bio$specificities, 
+  Model = paste0("CSF + PET (AUC = ", round(bio_auc, 3), ")"))
+
+#---
+roc_data <- bind_rows(roc_df_imaging, roc_df_combined, 
+                      roc_df_cdr, roc_df_bio)
+
+
+p <- ggplot(roc_data |> arrange(Sensitivity), 
+            aes(x = Specificity, y = Sensitivity, color = Model)) +
+  geom_line(size = 1.2) + 
+  geom_abline(linetype = "dashed", alpha = 0.5) +
+  scale_color_manual(values = custom_colors[1:4]) +
+  labs(
+    title = "ROC Curves: CDR, MRI Imaging, CSF, PET and Demographic Models",
+    x = "1 - Specificity", 
+    y = "Sensitivity"
+  ) +
+  theme(
+    plot.title = element_text(size = 13, vjust = 1.5),
+    legend.position = c(0.7, 0.2), legend.text = element_text(size = 10)
+  ) 
+
+p
+ggsave("results_baseline_AD-vs-CN/ML_Class.png", 
+       p, height = 7, width = 8, dpi = 300)
+```
+
+## Neuroimaging Summary and Clinical Relevance
+
+```{r imaging-summary}
+cat("NEUROIMAGING KEY FINDINGS:\n")
+cat("==========================\n\n")
+
+hip_test <- t.test(Hippocampus_norm ~ Group, data = baseline_data)
+cat("Hippocampal Atrophy:\n")
+cat("  AD patients show", round((1 - hip_test$estimate[1]/hip_test$estimate[2])*100, 1), 
+    "% volume reduction\n")
+cat("  Effect size (Cohen's d):", 
+    round(cohen.d(baseline_data$Hippocampus_norm ~ baseline_data$Group, na.rm = TRUE)$estimate, 2), "\n")
+cat("  p-value:", format.pval(hip_test$p.value), "\n\n")
+
+ento_test <- t.test(Entorhinal_norm ~ Group, data = baseline_data)
+cat("Entorhinal Cortex Atrophy:\n")
+cat("  AD patients show", round((1 - ento_test$estimate[1]/ento_test$estimate[2])*100, 1), 
+    "% volume reduction\n")
+cat("  Effect size (Cohen's d):", 
+    round(cohen.d(baseline_data$Entorhinal_norm ~ baseline_data$Group, na.rm = TRUE)$estimate, 2), "\n")
+cat("  p-value:", format.pval(ento_test$p.value), "\n\n")
+
+vent_test <- t.test(Ventricles_norm ~ Group, data = baseline_data)
+cat("Ventricular Enlargement:\n")
+cat("  AD patients show", round((vent_test$estimate[1]/vent_test$estimate[2] - 1)*100, 1), 
+    "% volume increase\n")
+cat("  Effect size (Cohen's d):", 
+    round(cohen.d(baseline_data$Ventricles_norm ~ baseline_data$Group, na.rm = TRUE)$estimate, 2), "\n")
+cat("  p-value:", format.pval(vent_test$p.value), "\n\n")
+
+cat("Clinical Implications:\n")
+cat("- Hippocampal and entorhinal atrophy are hallmark features of AD\n")
+cat("- Ventricular enlargement reflects global brain atrophy\n")
+cat("- Imaging measures strongly correlate with cognitive performance\n")
+cat("- Combined imaging-clinical models achieve excellent diagnostic accuracy\n")
 ```
 
 # Statistical Modeling
@@ -305,24 +853,26 @@ corrplot(cor(bio_corr_data, use = "complete.obs"),
 ## Logistic Regression: Predictors of AD Diagnosis
 
 ```{r logistic-regression}
-# data for modeling (complete cases only)
-model_data <- baseline_data %>%
-  select(Group, AGE, Male, PTEDUCAT, APOE4_1, APOE4_2,
-         MMSE_bl, ADAS11_bl, #MOCA_bl,  CDRSB_bl, 
-         FDG_bl, ABETA_numeric, TAU_numeric,) %>%
-  mutate(AD = ifelse(Group == "AD", 1, 0)) %>%
-  na.omit()
-
-cat("Model data dimensions:", dim(model_data), "\n")
-
 # Univariate models
 uni_vars <- c("AGE", "Male", "PTEDUCAT", "APOE4_1", "APOE4_2", 
               "MMSE_bl", "ADAS11_bl", "FDG_bl", #"MOCA_bl",  "CDRSB_bl", 
-              "ABETA_numeric", "TAU_numeric")
+              "ABETA_numeric", "TAU_numeric" #,"Hippocampus_norm", "Entorhinal_norm", "VBR"
+              )
+
+# data for modeling (complete cases only)
+model_data <- baseline_data %>%
+  select(Group, uni_vars) %>%
+  mutate(AD = ifelse(Group == "AD", 1, 0)) %>%
+  na.omit()
+
+model_data_scaled <- model_data %>%
+    mutate(across(uni_vars, scale))
+
+cat("Model data dimensions:", dim(model_data_scaled), "\n")
 
 uni_results <- map_dfr(uni_vars, ~{
   formula_str <- paste("AD ~", .x)
-  model <- glm(as.formula(formula_str), data = model_data, family = "binomial")
+  model <- glm(as.formula(formula_str), data = model_data_scaled, family = "binomial")
   tidy(model) %>%
     filter(term == .x) %>%
     mutate(variable = .x)
@@ -331,8 +881,12 @@ uni_results <- map_dfr(uni_vars, ~{
 # Multivariate model
 multi_model <- glm(AD ~ AGE + Male + PTEDUCAT + APOE4_1 + APOE4_2 + 
                    MMSE_bl + ADAS11_bl + #MOCA_bl +  CDRSB_bl +
-                   FDG_bl + ABETA_numeric + TAU_numeric,
-                   data = model_data, family = "binomial")
+                   FDG_bl + ABETA_numeric + TAU_numeric #+ Hippocampus_norm + Entorhinal_norm + VBR
+                   ,data = model_data, family = "binomial")
+
+# # here we use stepwise regression (using AIC or BIC criteria) to automatically
+# # eliminate predictors and check if the model improves.
+# step(multi_model, direction = "both")  # or use "backward" or "forward" based on our need
 
 multi_results <- tidy(multi_model) %>%
   filter(term != "(Intercept)") %>%
@@ -350,6 +904,18 @@ kable(multi_results %>%
   kable_styling(bootstrap_options = c("striped", "hover"))
 
 cat("Model AUC:", pROC::auc(pROC::roc(model_data$AD, predict(multi_model, type = "response"))), "\n")
+```
+
+```{r pca_as_predictors_in_regression_model, eval=FALSE, include=FALSE}
+# in case many predictors are highly correlated, we might want to apply PCA 
+# to reduce dimensionality and remove multicollinearity. PCA will create 
+# uncorrelated components that capture the maximum variance in our data.
+library(stats)
+pca_result <- prcomp(model_data %>%
+    select(AGE, Male, PTEDUCAT, APOE4_1, APOE4_2, MMSE_bl, ADAS11_bl, FDG_bl, ABETA_numeric, TAU_numeric, Hippocampus_norm, Entorhinal_norm, VBR),
+    scale = TRUE)  # standardize predictors before PCA
+summary(pca_result)
+
 ```
 
 ## Forest Plot of Odds Ratios
@@ -394,17 +960,15 @@ ggplot(forest_data, aes(x = reorder(Variable_Label, OR), y = OR)) +
 
 ## Principal Component Analysis
 
-```{r pca-analysis, fig.height=8, fig.width=12}
+```{r pca-analysis, fig.height=6, fig.width=12}
 # PCA on cognitive and biomarker variables
 pca_data <- baseline_data %>%
   select(Group, MMSE_bl, ADAS11_bl, ADAS13_bl, LDELTOTAL_BL,
          RAVLT_immediate_bl, FDG_bl, ABETA_numeric, TAU_numeric) %>%
   na.omit()
 
-# Perform PCA
 pca_result <- prcomp(pca_data[,-1], scale = TRUE, center = TRUE)
 
-# PCA plot
 pca_df <- data.frame(pca_result$x) %>%
   mutate(Group = pca_data$Group)
 
@@ -415,9 +979,9 @@ p1 <- ggplot(pca_df, aes(x = PC1, y = PC2, color = Group)) +
   labs(title = "Principal Component Analysis",
        subtitle = "Cognitive and Biomarker Variables",
        x = paste0("PC1 (", round(summary(pca_result)$importance[2,1]*100, 1), "%)"),
-       y = paste0("PC2 (", round(summary(pca_result)$importance[2,2]*100, 1), "%)"))
+       y = paste0("PC2 (", round(summary(pca_result)$importance[2,2]*100, 1), "%)")) +
+  theme(legend.position = "none")
 
-# Scree plot
 scree_data <- data.frame(
   PC = 1:length(pca_result$sdev),
   Variance = pca_result$sdev^2 / sum(pca_result$sdev^2)
@@ -427,11 +991,15 @@ p2 <- ggplot(scree_data, aes(x = PC, y = Variance)) +
   geom_col(fill = custom_colors[3], alpha = 0.7) +
   geom_line(group = 1) +
   geom_point() +
-  labs(title = "Scree Plot", y = "Proportion of Variance", x = "Principal Component")
+  labs(title = "Scree Plot", 
+       subtitle = "Top 8 Principal Components",
+       y = "Proportion of Variance", x = "Principal Component")
 
 grid.arrange(p1, p2, ncol = 2)
 
-# Variable loadings
+ggsave("results_baseline_AD-vs-CN/brain_region_vs_cognitive.png", 
+       combined, height = 9, width = 12, dpi = 300)
+
 loadings_df <- data.frame(pca_result$rotation[,1:2]) %>%
   rownames_to_column("Variable") %>%
   mutate(
@@ -448,45 +1016,178 @@ loadings_df <- data.frame(pca_result$rotation[,1:2]) %>%
     )
   )
 
-# Biplot
-ggplot() +
-  geom_point(data = pca_df, aes(x = PC1, y = PC2, color = Group), alpha = 0.6) +
+p <- ggplot() +
+  geom_point(data = pca_df, aes(x = PC1, y = PC2, color = Group), alpha = 0.3) +
   geom_segment(data = loadings_df, 
-               aes(x = 0, y = 0, xend = PC1*5, yend = PC2*5),
+               aes(x = 0, y = 0, xend = PC1*4, yend = PC2*4),
                arrow = arrow(length = unit(0.3, "cm")), color = "red") +
-  geom_text(data = loadings_df, 
-            aes(x = PC1*5.5, y = PC2*5.5, label = Variable_Label),
-            size = 3, color = "red") +
+  stat_ellipse(data = pca_df, aes(x = PC1, y = PC2, color = Group), 
+               type = "norm", linetype = 2, show.legend = FALSE) +
+  geom_text_repel(data = loadings_df, 
+            aes(x = PC1*4.5, y = PC2*4.5, label = Variable_Label),
+            size = 4, alpha = 0.7, segment.size = .25, segment.alpha = .8,
+            force = 1, color = "red", fontface = "bold",
+            position = position_dodge(1)) +
   scale_color_manual(values = custom_colors[1:2]) +
   labs(title = "PCA Biplot", 
        subtitle = "Variables (red) and Individuals (colored by group)")
+p
+
+full_layout <- arrangeGrob(grobs = list(p, arrangeGrob(p1, p2, ncol = 2)),
+  layout_matrix = rbind(c(1, 1), c(2, 2)))
+
+combined <- arrangeGrob(p, p2, ncol = 2)
+
+ggsave("results_baseline_AD-vs-CN/pca_analysis.png",
+       plot = combined, width = 11, height = 6, dpi = 300)
+```
+
+```{r pca-analysis, eval=FALSE, include=FALSE}
+# PCA on cognitive and biomarker variables
+pca_data <- baseline_data %>%
+  select(Group, MMSE_bl, ADAS11_bl, ADAS13_bl, LDELTOTAL_BL,
+         RAVLT_immediate_bl, FDG_bl, ABETA_numeric, TAU_numeric) %>%
+  na.omit()
+
+pca_result <- prcomp(pca_data[,-1], scale. = TRUE, center = TRUE)
+
+# Data for PCA scores and loadings
+pca_df <- data.frame(pca_result$x) %>%
+  mutate(Group = pca_data$Group)
+
+loadings_df <- data.frame(pca_result$rotation[,1:2]) %>%
+  rownames_to_column("Variable") %>%
+  mutate(
+    Variable_Label = case_when(
+      Variable == "MMSE_bl" ~ "MMSE",
+      Variable == "ADAS11_bl" ~ "ADAS-11",
+      Variable == "ADAS13_bl" ~ "ADAS-13",
+      Variable == "LDELTOTAL_BL" ~ "Logical Memory",
+      Variable == "RAVLT_immediate_bl" ~ "RAVLT Immediate",
+      Variable == "FDG_bl" ~ "FDG-PET",
+      Variable == "ABETA_numeric" ~ "CSF Aβ42",
+      Variable == "TAU_numeric" ~ "CSF Tau",
+      TRUE ~ Variable
+    )
+  )
+
+# PCA biplot
+p1 <- ggplot() +
+  geom_point(data = pca_df, aes(x = PC1, y = PC2, color = Group), alpha = 0.8, size = 2) +
+  stat_ellipse(data = pca_df, aes(x = PC1, y = PC2, color = Group), 
+               type = "norm", linetype = 2, show.legend = FALSE) +
+  geom_segment(data = loadings_df, 
+               aes(x = 0, y = 0, xend = PC1 * 5, yend = PC2 * 5),
+               arrow = arrow(length = unit(0.3, "cm")), color = "red") +
+  geom_text_repel(data = loadings_df, 
+                  aes(x = PC1 * 5.5, y = PC2 * 5.5, label = Variable_Label),
+                  size = 4, alpha = 0.8, color = "red", fontface = "bold") +
+  scale_color_manual(values = custom_colors[1:2]) +
+  labs(
+    title = "PCA Biplot",
+    subtitle = "Cognitive and Biomarker Variables",
+    x = paste0("PC1 (", round(summary(pca_result)$importance[2,1] * 100, 1), "%)"),
+    y = paste0("PC2 (", round(summary(pca_result)$importance[2,2] * 100, 1), "%)")
+  ) +
+  theme_minimal()
+
+# Scree plot
+scree_data <- data.frame(
+  PC = 1:length(pca_result$sdev),
+  Variance = pca_result$sdev^2 / sum(pca_result$sdev^2)
+)
+
+p2 <- ggplot(scree_data, aes(x = PC, y = Variance)) +
+  geom_col(fill = custom_colors[3], alpha = 0.7) +
+  geom_line(group = 1) +
+  geom_point() +
+  labs(
+    title = "Scree Plot", 
+    subtitle = "Variance Explained by Principal Components",
+    y = "Proportion of Variance", x = "Principal Component"
+  ) +
+  theme_minimal()
+
+# Combine and save
+combined <- gridExtra::arrangeGrob(p1, p2, ncol = 2)
+
+ggsave("results_baseline_AD-vs-CN/pca_analysis.png",
+       plot = combined, width = 12, height = 6.5, dpi = 300)
+
+```
+
+
+# Correlations of all measurements
+
+```{r}
+# we do correlation between brain measures and cognitive scores
+all_data <- baseline_data %>%
+  select("Group", cog_vars, bio_vars, imaging_vars) %>%
+  mutate(across(everything(), ~ ifelse(is.na(.), mean(., na.rm = TRUE), .))) %>%
+  select(where(~ mean(is.na(.)) < 0.3))
+ 
+all_data <- all_data %>%
+  rename(
+    MMSE = MMSE_bl,
+    `ADAS-11` = ADAS11_bl,
+    `ADAS-13` = ADAS13_bl,
+    `ADAS-Q4` = ADASQ4_bl,
+    `Logical Memory` = LDELTOTAL_BL,
+    `RAVLT Immediate` = RAVLT_immediate_bl,
+    `RAVLT Learning` = RAVLT_learning_bl,
+    `RAVLT Forgetting` = RAVLT_forgetting_bl,
+    MOCA = MOCA_bl,
+    `CDR-SB` = CDRSB_bl,
+    `Digit Symbol Substitution` = DIGITSCOR_bl,
+    FAQ = FAQ_bl,
+    `FDG-PET` = FDG_bl,
+    `Amyloid PET` = AV45_bl,
+    "CSF A\u03B242" = ABETA_numeric,
+    `CSF Tau` = TAU_numeric,
+    Ventricles = Ventricles_norm,
+    `Intracranial Volume ` = ICV_bl,
+    `Ventricular-to-Brain Ratio ` = VBR,
+    Hippocampus = Hippocampus_norm,
+    `Whole Brain` = WholeBrain_norm,
+    `Entorhinal Cortex` = Entorhinal_norm,
+    `Fusiform Gyrus` = Fusiform_norm,
+    `Middle Temporal` = MidTemp_norm
+  )
+
+# corr. matrix
+cor_matrix <- cor(all_data %>% select(-Group), use = "pairwise.complete.obs")
+
+png("results_baseline_AD-vs-CN/all_corrplot.png", width = 3100, height = 2400, res = 150)
+corrplot(cor_matrix, method = "color", order = "hclust", 
+         addCoef.col = "black", tl.col = "black", tl.srt = 45, 
+         number.cex = 1.2, tl.cex = 1.4, sig.level = 0.01, cex.main = 2.1,  
+         insig = "blank", diag = FALSE, cl.cex = 1.4,
+         title = "Correlations: Brain Structure, Cognitive Measures, Imaging and CSF Biomarkers"
+         ,mar = c(1, 1, 6, 1)
+         )    # margin: bottom, left, top, right
+dev.off()
 ```
 
 # Summary and Conclusions
 
 ```{r summary-stats}
-# Summary statistics
 cat("Key Findings:\n")
 cat("=============\n\n")
 
-# Sample sizes
 n_ad <- sum(baseline_data$Group == "AD", na.rm = TRUE)
 n_cn <- sum(baseline_data$Group == "CN", na.rm = TRUE)
 cat("Sample Sizes: AD =", n_ad, ", CN =", n_cn, "\n\n")
 
-# Age comparison
 age_test <- t.test(AGE ~ Group, data = baseline_data)
 cat("Age: AD patients are significantly older than CN controls\n")
 cat("  Mean difference:", round(age_test$estimate[1] - age_test$estimate[2], 1), "years\n")
 cat("  p-value:", format.pval(age_test$p.value, digits = 3), "\n\n")
 
-# MMSE comparison
 mmse_test <- t.test(MMSE_bl ~ Group, data = baseline_data)
 cat("MMSE: AD patients have significantly lower scores\n")
 cat("  Mean difference:", round(mmse_test$estimate[2] - mmse_test$estimate[1], 1), "points\n")
 cat("  p-value:", format.pval(mmse_test$p.value, digits = 3), "\n\n")
 
-# APOE4 association
 apoe_test <- chisq.test(table(baseline_data$Group, baseline_data$APOE4))
 cat("APOE4: Significantly associated with AD diagnosis\n")
 cat("  Chi-square p-value:", format.pval(apoe_test$p.value, digits = 3), "\n")

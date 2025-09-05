@@ -111,6 +111,7 @@ adnim_cols <- c(
     "AV45_bl", "AV45",
     "ABETA_bl", "ABETA",
     "TAU_bl", "TAU",
+    "PTAU_bl", "PTAU",
     "ADAS11_bl", "ADAS11",
     "ADAS13_bl", "ADAS13",
     "ADASQ4_bl", "ADASQ4",
@@ -128,7 +129,9 @@ adnim_cols <- c(
     "WholeBrain_bl", "WholeBrain",
     "Entorhinal_bl", "Entorhinal",
     "Fusiform_bl", "Fusiform",
-    "MidTemp_bl", "MidTemp"
+    "MidTemp_bl", "MidTemp",
+    "DIGITSCOR_bl", "DIGITSCOR",
+    "FAQ_bl", "FAQ"
 )
 
 
