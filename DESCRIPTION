@@ -4,13 +4,13 @@ Version: 0.99.0
 Date: 2024-12-17
 Authors@R: 
     person("Dany", "Mukesha", , "danymukesha@gmail.com", 
-            role = c("aut", "cre"),
+           role = c("aut", "cre"),
            comment = c(ORCID = "0009-0001-9514-751X"))
-Description: Alzheimer's Disease Neuroimaging Initiative (ADNI) provide 
+Description: Alzheimer's Disease Neuroimaging Initiative (ADNI) provides 
     a list of omics, among them there is metabolomics data. We collected 
-    those data and curated them with closer look, for helping users
-    to exploite and navigate easily into the ADNI metabolomic
-    datasets. It is possible to access to various datasets from the ADNI, 
+    those data and curated them with a closer look, to help users
+    explore and navigate easily through the ADNI metabolomics
+    datasets. It is possible to access various datasets from ADNI, 
     including demographic, clinical, biomarker, imaging, and cognitive 
     composite data.
 License: Artistic-2.0
@@ -19,9 +19,10 @@ biocViews: Software
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
-Suggests: 
+Depends: 
+    R (>= 3.5)
+Imports: 
     BiocStyle,
-    knitr,
     RefManageR,
     rmarkdown,
     sessioninfo,
@@ -30,10 +31,12 @@ Suggests:
     dplyr,
     data.table,
     caret,
-    logspline
-VignetteBuilder: knitr
-Depends: 
-    R (>= 3.5)
-LazyData: true
-Imports: 
+    logspline,
+    stringr,
     methods
+Suggests: 
+    BiocStyle, 
+    knitr, 
+    rmarkdown
+VignetteBuilder: knitr
+LazyData: true

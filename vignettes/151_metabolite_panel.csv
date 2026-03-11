@@ -1,0 +1,152 @@
+,Metabolite,Class
+1,CDCA,Bile Acids
+2,t4-OH-Pro,Amino Acid-related
+3,DiCA(14:0),Carboxylic Acids
+4,DG(18:2_18:3),Diglycerides
+5,FA(16:0),Fatty Acids
+6,C3,Acylcarnitines
+7,C5-M-DC,Acylcarnitines
+8,Xanthine,Nucleobases and Related
+9,DCA,Bile Acids
+10,PC ae C42:1,Phosphatidylcholines
+11,TMCA,Bile Acids
+12,PC ae C36:5,Phosphatidylcholines
+13,GLCA,Bile Acids
+14,SM C26:0,Sphingomyelins
+15,Betaine,Amino Acid-related
+16,3-IAA,Indoles and Derivatives
+17,Hex3Cer(d18:1/26:1),Trihexosylceramides
+18,Trp,Amino Acids
+19,Serotonin,Biogenic Amines
+20,HexCer(d18:1/26:1),Hexosylceramides
+21,C7-DC,Acylcarnitines
+22,DG(22:1_22:2),Diglycerides
+23,PC ae C44:3,Phosphatidylcholines
+24,C0,Acylcarnitines
+25,C10,Acylcarnitines
+26,TG(20:3_36:5),Triglycerides
+27,Cer(d18:0/20:0),Ceramides
+28,DG-O(18:2_18:2),Diglycerides
+29,Cer(d18:0/16:0),Ceramides
+30,DOPA,Amino Acid-related
+31,Pro,Amino Acids
+32,PC aa C34:1,Phosphatidylcholines
+33,Cys,Amino Acids
+34,DG(18:1_22:5),Diglycerides
+35,DG(18:1_18:1),Diglycerides
+36,C16-OH,Acylcarnitines
+37,CE(20:4),Cholesteryl Esters
+38,DG(18:1_18:4),Diglycerides
+39,DG(14:0_14:0),Diglycerides
+40,Spermine,Biogenic Amines
+41,PEA,Biogenic Amines
+42,Trigonelline,Alkaloids
+43,HipAcid,Carboxylic Acids
+44,HexCer(d18:1/24:0),Hexosylceramides
+45,TG(20:4_36:3),Triglycerides
+46,PC aa C36:2,Phosphatidylcholines
+47,SM C16:1,Sphingomyelins
+48,Sarcosine,Amino Acid-related
+49,TrpBetaine,Amino Acid-related
+50,HexCer(d18:1/18:0),Hexosylceramides
+51,TG(18:2_36:3),Triglycerides
+52,DG(18:2_20:0),Diglycerides
+53,Cer(d18:1/20:0),Ceramides
+54,PC ae C42:5,Phosphatidylcholines
+55,TG(16:1_34:3),Triglycerides
+56,DHA,Fatty Acids
+57,TG(22:6_32:0),Triglycerides
+58,C9,Acylcarnitines
+59,TG(16:1_36:2),Triglycerides
+60,TG(16:0_32:0),Triglycerides
+61,DG(21:0_22:6),Diglycerides
+62,Cer(d16:1/20:0),Ceramides
+63,Anserine,Amino Acid-related
+64,DG(16:0_16:1),Diglycerides
+65,TG(22:2_32:4),Triglycerides
+66,PC ae C30:2,Phosphatidylcholines
+67,TG(16:0_28:2),Triglycerides
+68,Cer(d18:1/18:0),Ceramides
+69,TCDCA,Bile Acids
+70,TG(16:1_32:0),Triglycerides
+71,TG(18:1_32:3),Triglycerides
+72,Ac-Orn,Amino Acid-related
+73,GDCA,Bile Acids
+74,TG(16:0_34:0),Triglycerides
+75,AbsAcid,Carboxylic Acids
+76,TLCA,Bile Acids
+77,TG(16:0_38:1),Triglycerides
+78,DG(17:0_17:1),Diglycerides
+79,HexCer(d18:1/26:0),Hexosylceramides
+80,Hex2Cer(d18:1/20:0),Dihexosylceramides
+81,HexCer(d18:2/20:0),Hexosylceramides
+82,Choline,Vitamins and Cofactors
+83,TG(18:1_30:2),Triglycerides
+84,PC aa C38:3,Phosphatidylcholines
+85,CE(22:6),Cholesteryl Esters
+86,c4-OH-Pro,Amino Acid-related
+87,lysoPC a C28:0,Lysophosphatidylcholines
+88,CE(22:5),Cholesteryl Esters
+89,TG(18:3_35:2),Triglycerides
+90,CE(16:0),Cholesteryl Esters
+91,BABA,Amino Acid-related
+92,TG(18:2_36:2),Triglycerides
+93,Hypoxanthine,Nucleobases and Related
+94,TG(20:3_36:3),Triglycerides
+95,C12,Acylcarnitines
+96,H1,Carbohydrates and Related
+97,C3-DC (C4-OH),Acylcarnitines
+98,PC aa C42:5,Phosphatidylcholines
+99,Cer(d18:2/14:0),Ceramides
+100,TG(18:1_36:3),Triglycerides
+101,TG(22:4_32:0),Triglycerides
+102,TG(16:0_34:1),Triglycerides
+103,TG(18:1_30:1),Triglycerides
+104,Glu,Amino Acids
+105,HArg,Amino Acid-related
+106,TG(22:5_32:0),Triglycerides
+107,DG(14:0_18:1),Diglycerides
+108,PC ae C42:0,Phosphatidylcholines
+109,TG(20:5_36:3),Triglycerides
+110,Cer(d18:1/22:0),Ceramides
+111,HexCer(d16:1/22:0),Hexosylceramides
+112,beta-Ala,Amino Acid-related
+113,PC ae C38:5,Phosphatidylcholines
+114,FA(18:0),Fatty Acids
+115,TG(18:1_38:6),Triglycerides
+116,C14:1,Acylcarnitines
+117,TG(17:1_38:7),Triglycerides
+118,Nitro-Tyr,Amino Acid-related
+119,HexCer(d18:2/22:0),Hexosylceramides
+120,3-IPA,Indoles and Derivatives
+121,PC aa C38:4,Phosphatidylcholines
+122,DG(18:1_20:4),Diglycerides
+123,PC aa C42:4,Phosphatidylcholines
+124,Cer(d18:1/20:0(OH)),Ceramides
+125,PC ae C38:0,Phosphatidylcholines
+126,DG-O(16:0_20:4),Diglycerides
+127,TG(20:1_34:0),Triglycerides
+128,TG(18:1_36:2),Triglycerides
+129,PC aa C40:3,Phosphatidylcholines
+130,GLCAS,Bile Acids
+131,DG(16:1_18:2),Diglycerides
+132,lysoPC a C24:0,Lysophosphatidylcholines
+133,SM C18:1,Sphingomyelins
+134,GUDCA,Bile Acids
+135,OH-GlutAcid,Carboxylic Acids
+136,C14,Acylcarnitines
+137,Cer(d16:1/22:0),Ceramides
+138,TG(18:2_32:0),Triglycerides
+139,TG(16:1_36:3),Triglycerides
+140,C5-OH (C3-DC-M),Acylcarnitines
+141,TG(18:1_34:4),Triglycerides
+142,PC aa C36:3,Phosphatidylcholines
+143,Cer(d18:2/16:0),Ceramides
+144,Lac,Carboxylic Acids
+145,DG(18:1_22:6),Diglycerides
+146,CA,Bile Acids
+147,Cer(d18:0/18:0),Ceramides
+148,Val,Amino Acids
+149,Phe,Amino Acids
+150,SM (OH) C24:1,Sphingomyelins
+151,HexCer(d18:2/23:0),Hexosylceramides

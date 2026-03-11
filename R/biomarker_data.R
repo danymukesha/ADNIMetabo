@@ -7,6 +7,7 @@
 #' documentation.
 #' \describe{
 #'   \item{RID}{Participant roster ID}
+#'   \item{VISCODE}{Visit code}
 #'   \item{ABETA}{CSF ABETA}
 #'   \item{TAU}{CSF TAU}
 #'   \item{PTAU}{CSF PTAU}

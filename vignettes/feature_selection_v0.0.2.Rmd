@@ -1,0 +1,215 @@
+---
+title: "Elastic Net regularization (mixed L1 + L2)"
+author: "Mukesha et al."
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    self_contained: true
+    code_folding: hide
+  word_document:
+    toc: true
+  pdf_document:
+    toc: true
+    latex_engine: xelatex
+bibliography: AD_vs_CN_references.bib
+editor_options:
+  markdown:
+    wrap: 72
+abstract: |
+  This report compares LASSO (α = 1), Ridge (α = 0), and Elastic Net (α ∈
+  [0,1]) regularization methods on metabolomics data distinguishing
+  Alzheimer’s disease (AD) from cognitively normal controls (CN). The analysis
+  uses glmnet with repeated cross-validation, evaluates tuning parameters
+  (alpha, lambda), generates coefficient paths, identifies selected
+  metabolites, and produces publication-quality visualizations.
+---
+
+in this version, I:
+
+* remove redundant code
+* use a clear training/validation split
+* eliminate your complex seed-handling (not needed)
+* use a simple `tuneGrid` so you control α directly
+* parallelize safely
+* produce variable selection and plots cleanly
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(caret)
+library(glmnet)
+library(doParallel)
+library(dplyr)
+library(ggplot2)
+library(tibble)
+library(kableExtra)
+library(tidyr)
+library(readr)
+```
+
+# Load and prepare data
+
+```{r load}
+data <- read.csv("03_EffectsAdjusted.csv")
+data$Allgr <- factor(data$Allgr, levels = c("CN", "AD"))
+
+X <- data[, 8:ncol(data)]  
+y <- data$Allgr
+```
+
+# Train/test split
+
+```{r split}
+set.seed(123)
+train_index <- createDataPartition(y, p = 0.7, list = FALSE)
+
+trainX <- X[train_index, ]
+trainY <- y[train_index]
+
+testX  <- X[-train_index, ]
+testY  <- y[-train_index]
+```
+
+# Fit Ridge, Elastic Net, and LASSO
+
+```{r}
+set.seed(2024)
+
+alpha_values <- c(0, 0.1, 0.5, 0.9, 1)   # Ridge → Elastic Net → LASSO
+lambda_seq <- exp(seq(log(0.0001), log(1), length.out = 50))
+
+tune <- expand.grid(alpha = alpha_values, lambda = lambda_seq)
+
+cl <- makeCluster(detectCores() - 2)
+registerDoParallel(cl)
+ctrl <- trainControl(
+    method = "repeatedcv",
+    number = 10, repeats = 5,
+    summaryFunction = twoClassSummary,
+    classProbs = TRUE,
+    savePredictions = TRUE
+)
+
+fit <- train(
+    x = trainX,
+    y = trainY,
+    method = "glmnet",
+    metric = "ROC",
+    trControl = ctrl,
+    tuneGrid = tune,
+    preProcess = c("center", "scale", "medianImpute")
+)
+```
+
+
+# Comparison Table (Ridge vs EN vs LASSO)**
+
+```{r}
+perf_table <- fit$results %>%
+    group_by(alpha) %>%
+    summarize(
+        Best_ROC = max(ROC),
+        Best_lambda = lambda[which.max(ROC)]
+    )
+
+perf_table %>%
+    kable("html", caption = "Performance Comparison Across Regularization Types") %>%
+    kable_styling(full_width = FALSE)
+```
+
+# Coefficient Path Plot (LASSO path)**
+
+We use `glmnet` directly for path plotting:
+
+```{r}
+lasso_path <- glmnet(
+    as.matrix(trainX),
+    trainY,
+    alpha = 1,
+    family = "binomial",
+    standardize = TRUE
+)
+
+stopCluster(cl)
+registerDoSEQ()
+
+png("LASSO_path_plot.png", width = 1500, height = 1200, res = 180)
+plot(lasso_path, xvar = "lambda", label = TRUE)
+dev.off()
+```
+
+# Top features
+
+```{r}
+best_alpha  <- fit$bestTune$alpha
+best_lambda <- fit$bestTune$lambda
+
+coef_mat <- coef(fit$finalModel, s = best_lambda)
+coef_df <- data.frame(
+    Feature = rownames(coef_mat),
+    Coef = as.numeric(coef_mat)
+) %>%
+    filter(Feature != "(Intercept)", Coef != 0) %>%
+    arrange(desc(abs(Coef))) %>%
+    head(50)   # top 50 for readability
+
+p <- ggplot(coef_df, aes(x = reorder(Feature, abs(Coef)), y = Coef, fill = Coef > 0)) +
+    geom_bar(stat = "identity") +
+    coord_flip() +
+    scale_fill_manual(values = c("#D55E00", "#0072B2")) +
+    theme_bw(base_size = 13) +
+    labs(
+        title = "Top 50 Features Selected by Elastic Net",
+        subtitle = paste("alpha =", best_alpha, "| lambda =", round(best_lambda, 5)),
+        x = "Metabolites",
+        y = "Coefficient"
+    )
+p
+ggsave("Top50_EN_features_publication.png", p, width = 8, height = 10, dpi = 300)
+```
+
+# Export Selected Metabolites + Coefficients
+
+```{r}
+selected_features <- coef_df
+
+write.csv(selected_features, "Selected_Metabolites_EN.csv", row.names = FALSE)
+saveRDS(selected_features, "Selected_Metabolites_EN.rds")
+```
+
+# Save text summary
+
+```{r}
+sink("feature_selection_resport.txt")
+
+cat("===== FEATURE SELECTION REPORT =====\n")
+cat("Best alpha:", best_alpha, "\n")
+cat("Best lambda:", best_lambda, "\n\n")
+
+cat("=== Number of Selected Features ===\n")
+cat(nrow(selected_features), "\n\n")
+
+cat("=== Top 10 Features ===\n")
+print(head(selected_features, 10))
+
+cat("\n=== Performance Summary ===\n")
+print(perf_table)
+
+sink()
+```
+```{r}
+cat("===== FEATURE SELECTION REPORT =====\n")
+cat("Best alpha:", best_alpha, "\n")
+cat("Best lambda:", best_lambda, "\n\n")
+
+cat("=== Number of Selected Features ===\n")
+cat(nrow(selected_features), "\n\n")
+
+cat("=== Top 10 Features ===\n")
+print(head(selected_features, 10))
+
+cat("\n=== Performance Summary ===\n")
+print(perf_table)
+```
+

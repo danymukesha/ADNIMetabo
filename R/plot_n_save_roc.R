@@ -6,6 +6,7 @@
 #' @param roc_obj A `pROC::roc` object.
 #' @param filename Output filename for the saved plot (e.g., "roc_curve.png").
 #' @param title Title of the plot.
+#' @param subtitle Subtitle of the plot.
 #' @param width Width of the saved image in inches.
 #' @param height Height of the saved image in inches.
 #' @param line_color Color of the ROC curve line.
@@ -33,6 +34,7 @@
 plot_and_save_roc <- function(roc_obj,
                               filename = "roc_curve.png",
                               title = "ROC Curve",
+                              subtitle = NULL,
                               width = 5,
                               height = 5,
                               line_color = "blue",
@@ -103,7 +105,8 @@ plot_and_save_roc <- function(roc_obj,
             label = auc_label, size = 5, hjust = 0
         ) +
         ggplot2::labs(
-            title = title, x = "False Positive Rate",
+            title = title, subtitle = subtitle,
+            x = "False Positive Rate",
             y = "True Positive Rate"
         ) +
         ggplot2::theme_bw() +

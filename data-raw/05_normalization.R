@@ -24,15 +24,16 @@ library(tidyverse)
 # valid_data <- trans |>
 #    dplyr::filter(Concentration > LOD_threshold, !is.na(Concentration))
 
-tbbl <- ADNIMetabo::FIA_processed$qc_w_metabo_data
+tbbl <- adni.metabo::FIA_processed$qc_w_metabo_data
 # todo: now FIA for test, then will create function
 # to automatized the process with but FIA and UPLC
 
 # check out the duplicated RID - VISCODE
-tbbl |> dplyr::filter(`Sample Type` != "QC") |>
+tbbl |>
+    dplyr::filter(`Sample Type` != "QC") |>
     dplyr::group_by(RID, VISCODE, `Plate Bar Code`) |>
-    dplyr::filter(n() > 1 ) |>
-    dplyr::summarize(n = n(),  .groups = "keep") -> duplicated_tbbl
+    dplyr::filter(n() > 1) |>
+    dplyr::summarize(n = n(), .groups = "keep") -> duplicated_tbbl
 
 duplicated_rows <- duplicated_tbbl$RID
 tbbl <- tbbl |> dplyr::filter(!RID %in% c(duplicated_rows))
@@ -42,8 +43,9 @@ orig_cols <- names(tbbl)
 
 transformed_data <- tbbl |>
     tidyr::separate(`Plate Bar Code`,
-                    into = c("Plate", "PlateID"),
-                    sep = "-") |>
+        into = c("Plate", "PlateID"),
+        sep = "-"
+    ) |>
     dplyr::select(-PlateID) |>
     dplyr::mutate(SampleID = paste0(RID, "_", VISCODE)) |>
     tidyr::pivot_longer(
@@ -58,13 +60,11 @@ target_values <- tbbl |>
     dplyr::filter(`Sample Type` == "QC") |>
     dplyr::select(-RID, -VISCODE, -`Plate Bar Code`, -`Sample Type`) |>
     summarise(across(everything(), mean, na.rm = TRUE)) |>
-
     tidyr::pivot_longer(
         cols = everything(),
         names_to = "Analyte",
         values_to = "TargetValue"
     ) |>
-
     dplyr::mutate(QC_Level = "QC") |>
     dplyr::select(Analyte, QC_Level, TargetValue)
 
@@ -81,40 +81,44 @@ reference_sample <- "QC" # can be a sample name or sample type
 
 ## STEP 2: Calculate correction factors ====
 if (normalization_type == "target") {
-
     correction_factors <- valid_data |>
-        dplyr::filter(`Sample Type` == "QC", grepl(reference_sample,
-                                                   `Sample Type`)) |>
+        dplyr::filter(`Sample Type` == "QC", grepl(
+            reference_sample,
+            `Sample Type`
+        )) |>
         dplyr::group_by(Plate, Analyte) |>
         dplyr::summarize(
-            Stat = if (use_median)
+            Stat = if (use_median) {
                 median(Concentration)
-            else
-                mean(Concentration),
+            } else {
+                mean(Concentration)
+            },
             .groups = "drop"
         ) |>
         dplyr::left_join(target_values, by = "Analyte") |>
         dplyr::mutate(CorrectionFactor = Stat / TargetValue)
-
 } else if (normalization_type == "reference") {
-
     # step A: calculate A = mean/median per plate, per analyte/metabolite
     A <- valid_data |>
         dplyr::filter(SampleID == reference_sample | SampleType == reference_sample) |>
         dplyr::group_by(Plate, Analyte) |>
-        dplyr::summarize(A = if (use_median)
-            median(Concentration)
-            else
-                mean(Concentration),
-            .groups = "drop")
+        dplyr::summarize(
+            A = if (use_median) {
+                median(Concentration)
+            } else {
+                mean(Concentration)
+            },
+            .groups = "drop"
+        )
 
     # step B: calculate B = overall mean/median per analyte/metabolite
     B <- A |>
         dplyr::group_by(Analyte) |>
-        dplyr::summarize(B = if (use_median)
+        dplyr::summarize(B = if (use_median) {
             median(A)
-            else
-                mean(A), .groups = "drop")
+        } else {
+            mean(A)
+        }, .groups = "drop")
 
     # step C: correction factor = A / B
     correction_factors <- A |>
@@ -127,7 +131,7 @@ normalized_data <- valid_data |>
     dplyr::left_join(correction_factors, by = c("Plate", "Analyte")) |>
     dplyr::mutate(NormalizedConcentration = Concentration / CorrectionFactor) |>
     dplyr::select(-c(Stat, QC_Level, TargetValue))
-    # |>  filter(if_any(everything(), ~ is.na(.)))
+# |>  filter(if_any(everything(), ~ is.na(.)))
 
 # for Samples without their correspoonding plate for QCs
 correction_factors_mean <- correction_factors |>
@@ -139,14 +143,18 @@ correction_factors_mean <- correction_factors |>
     ) |>
     dplyr::rename(CorrectionFactor = mean)
 
-normalized_data_mean <- normalized_data |> filter(if_any(everything(), ~ is.na(.))) |>
-    dplyr::select(where(function(x) !all(is.na(x)))) |> unique() |>
+normalized_data_mean <- normalized_data |>
+    filter(if_any(everything(), ~ is.na(.))) |>
+    dplyr::select(where(function(x) !all(is.na(x)))) |>
+    unique() |>
     dplyr::left_join(correction_factors_mean, by = c("Analyte")) |>
     dplyr::mutate(NormalizedConcentration = Concentration / CorrectionFactor)
 
-normalized_data <- normalized_data |> filter(if_all(everything(), ~ !is.na(.))) |>
+normalized_data <- normalized_data |>
+    filter(if_all(everything(), ~ !is.na(.))) |>
     rbind(normalized_data_mean) |>
-    dplyr::filter(`Sample Type` == "Sample") |> unique()
+    dplyr::filter(`Sample Type` == "Sample") |>
+    unique()
 
 ## Result ====
 head(normalized_data)
@@ -172,10 +180,11 @@ tbbl <- UPLC_processed$qc_w_metabo_data
 # to automatized the process with but FIA and UPLC
 
 # check out the duplicated RID - VISCODE
-tbbl |> dplyr::filter(`Sample Type` != "QC") |>
+tbbl |>
+    dplyr::filter(`Sample Type` != "QC") |>
     dplyr::group_by(RID, VISCODE, `Plate Bar Code`) |>
-    dplyr::filter(n() > 1 ) |>
-    dplyr::summarize(n = n(),  .groups = "keep") -> duplicated_tbbl
+    dplyr::filter(n() > 1) |>
+    dplyr::summarize(n = n(), .groups = "keep") -> duplicated_tbbl
 
 duplicated_rows <- duplicated_tbbl$RID
 tbbl <- tbbl |> dplyr::filter(!RID %in% c(duplicated_rows))
@@ -185,8 +194,9 @@ orig_cols <- names(tbbl)
 
 transformed_data <- tbbl |>
     tidyr::separate(`Plate Bar Code`,
-                    into = c("Plate", "PlateID"),
-                    sep = "-") |>
+        into = c("Plate", "PlateID"),
+        sep = "-"
+    ) |>
     dplyr::select(-PlateID) |>
     dplyr::mutate(SampleID = paste0(RID, "_", VISCODE)) |>
     tidyr::pivot_longer(
@@ -201,13 +211,11 @@ target_values <- tbbl |>
     dplyr::filter(`Sample Type` == "QC") |>
     dplyr::select(-RID, -VISCODE, -`Plate Bar Code`, -`Sample Type`) |>
     summarise(across(everything(), mean, na.rm = TRUE)) |>
-
     tidyr::pivot_longer(
         cols = everything(),
         names_to = "Analyte",
         values_to = "TargetValue"
     ) |>
-
     dplyr::mutate(QC_Level = "QC") |>
     dplyr::select(Analyte, QC_Level, TargetValue)
 
@@ -224,40 +232,44 @@ reference_sample <- "QC" # can be a sample name or sample type
 
 ## STEP 2: Calculate correction factors ====
 if (normalization_type == "target") {
-
     correction_factors <- valid_data |>
-        dplyr::filter(`Sample Type` == "QC", grepl(reference_sample,
-                                                   `Sample Type`)) |>
+        dplyr::filter(`Sample Type` == "QC", grepl(
+            reference_sample,
+            `Sample Type`
+        )) |>
         dplyr::group_by(Plate, Analyte) |>
         dplyr::summarize(
-            Stat = if (use_median)
+            Stat = if (use_median) {
                 median(Concentration)
-            else
-                mean(Concentration),
+            } else {
+                mean(Concentration)
+            },
             .groups = "drop"
         ) |>
         dplyr::left_join(target_values, by = "Analyte") |>
         dplyr::mutate(CorrectionFactor = Stat / TargetValue)
-
 } else if (normalization_type == "reference") {
-
     # step A: calculate A = mean/median per plate, per analyte/metabolite
     A <- valid_data |>
         dplyr::filter(SampleID == reference_sample | SampleType == reference_sample) |>
         dplyr::group_by(Plate, Analyte) |>
-        dplyr::summarize(A = if (use_median)
-            median(Concentration)
-            else
-                mean(Concentration),
-            .groups = "drop")
+        dplyr::summarize(
+            A = if (use_median) {
+                median(Concentration)
+            } else {
+                mean(Concentration)
+            },
+            .groups = "drop"
+        )
 
     # step B: calculate B = overall mean/median per analyte/metabolite
     B <- A |>
         dplyr::group_by(Analyte) |>
-        dplyr::summarize(B = if (use_median)
+        dplyr::summarize(B = if (use_median) {
             median(A)
-            else
-                mean(A), .groups = "drop")
+        } else {
+            mean(A)
+        }, .groups = "drop")
 
     # step C: correction factor = A / B
     correction_factors <- A |>
@@ -282,14 +294,18 @@ correction_factors_mean <- correction_factors |>
     ) |>
     dplyr::rename(CorrectionFactor = mean)
 
-normalized_data_mean <- normalized_data |> filter(if_any(everything(), ~ is.na(.))) |>
-    dplyr::select(where(function(x) !all(is.na(x)))) |> unique() |>
+normalized_data_mean <- normalized_data |>
+    filter(if_any(everything(), ~ is.na(.))) |>
+    dplyr::select(where(function(x) !all(is.na(x)))) |>
+    unique() |>
     dplyr::left_join(correction_factors_mean, by = c("Analyte")) |>
     dplyr::mutate(NormalizedConcentration = Concentration / CorrectionFactor)
 
-normalized_data <- normalized_data |> filter(if_all(everything(), ~ !is.na(.))) |>
+normalized_data <- normalized_data |>
+    filter(if_all(everything(), ~ !is.na(.))) |>
     rbind(normalized_data_mean) |>
-    dplyr::filter(`Sample Type` == "Sample") |> unique()
+    dplyr::filter(`Sample Type` == "Sample") |>
+    unique()
 
 ## Result ====
 head(normalized_data)

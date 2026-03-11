@@ -4,6 +4,12 @@ title: 'ADNI Baseline Analysis: AD vs CN'
 author: "Dany MUKESHA"
 date: "`r Sys.Date()`"
 output:
+  pdf_document:
+    toc: true
+    fig_width: 8
+    fig_height: 5
+  word_document:
+    toc: true
   html_document:
     toc: true
     toc_float: true
@@ -11,12 +17,6 @@ output:
     code_folding: hide
     fig_width: 10
     fig_height: 6
-  word_document:
-    toc: true
-  pdf_document:
-    toc: true
-    fig_width: 8
-    fig_height: 5
 editor_options:
   markdown:
     wrap: 72
@@ -81,9 +81,9 @@ RIDs_with_metabo_data <- data$RID
 ```{r data-prep}
 # baseline subset for case-control analysis
 baseline_data <- adnim %>%
-  filter(VISCODE == "bl", DX_bl %in% c("AD", "CN")) %>%
+  #filter(VISCODE == "bl", DX_bl %in% c("AD", "CN")) %>%
   mutate(
-    Group = factor(DX_bl, levels = c("CN", "AD")),
+    #Group = factor(DX_bl, levels = c("CN", "AD")),
     APOE4_status = case_when(
       APOE4 == 0 ~ "No APOE4",
       APOE4 == 1 ~ "One APOE4",
@@ -100,7 +100,7 @@ baseline_data <- adnim %>%
     ABETA_numeric = as.numeric(ifelse(ABETA_bl == "", NA, ABETA_bl)),
     TAU_numeric = as.numeric(ifelse(TAU_bl == "", NA, TAU_bl))
   ) %>%
-  dplyr::filter(RID %in% RIDs_with_metabo_data) %>%
+  #dplyr::filter(RID %in% RIDs_with_metabo_data) %>%
   select(-ABETA_bl, -TAU_bl, -ABETA, -TAU) 
 
 cat("Sample Sizes:\n")
@@ -686,7 +686,7 @@ p2_nolegend <- p2 + theme(legend.position = "none")
 p3_nolegend <- p3 + theme(legend.position = "none")
 p4_nolegend <- p4 + theme(legend.position = "none")
 
-combined <- grid.arrange(x,
+combined <- grid.arrange(
   arrangeGrob(p1_nolegend, p2_nolegend, p3_nolegend, p4_nolegend, ncol = 2),
   legend,
   nrow = 2,
@@ -960,7 +960,7 @@ ggplot(forest_data, aes(x = reorder(Variable_Label, OR), y = OR)) +
 
 ## Principal Component Analysis
 
-```{r pca-analysis, fig.height=6, fig.width=12}
+```{r pca-analysis-adv, fig.height=6, fig.width=12}
 # PCA on cognitive and biomarker variables
 pca_data <- baseline_data %>%
   select(Group, MMSE_bl, ADAS11_bl, ADAS13_bl, LDELTOTAL_BL,

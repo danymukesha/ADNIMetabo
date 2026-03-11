@@ -1,0 +1,384 @@
+---
+title: "Elastic Net regularization (mixed L1 + L2)"
+author: "Mukesha et al."
+output:
+  pdf_document:
+    toc: true
+    latex_engine: xelatex
+  word_document:
+    toc: true
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    self_contained: true
+    code_folding: hide
+bibliography: AD_vs_CN_references.bib
+editor_options:
+  markdown:
+    wrap: 72
+abstract: |
+  This report compares LASSO (α = 1), Ridge (α = 0), and Elastic Net (α ∈
+  [0,1]) regularization methods on metabolomics data distinguishing
+  Alzheimer’s disease (AD) from cognitively normal controls (CN). The analysis
+  uses glmnet with repeated cross-validation, evaluates tuning parameters
+  (alpha, lambda), generates coefficient paths, identifies selected
+  metabolites, and produces publication-quality visualizations.
+---
+
+in this version, I:
+
+* remove redundant code
+* use a clear training/validation split
+* eliminate your complex seed-handling (not needed)
+* use a simple `tuneGrid` so you control α directly
+* parallelize safely
+* produce variable selection and plots cleanly
+
+
+Below is a **high-level, publication-quality description** of your supplementary material.
+It reads like an appendix section in a peer-reviewed metabolomics or computational biology paper.
+I avoided emojis, “AI-ish” filler, and kept the tone formal, concise, and scientific.
+
+You can paste this directly below the YAML header in your R Markdown document.
+
+---
+
+# Appendix: Elastic Net Regularization Workflow (Supplementary Methods)
+
+This appendix documents the analytical framework used to compare LASSO, Ridge, and Elastic Net regularization approaches for distinguishing Alzheimer’s disease (AD) from cognitively normal controls (CN) using targeted metabolomics data. The analyses were implemented in **R** using the `caret` and `glmnet` packages, with an emphasis on transparent model tuning, reproducibility, and interpretable variable selection.
+
+## Overview of Analytical Strategy
+
+The objective of this workflow is to evaluate how different values of the mixing parameter α influence classification performance and feature selection. We consider:
+
+* **α = 1** → LASSO (pure L1 regularization; induces sparsity)
+* **α = 0** → Ridge (pure L2 regularization; shrinks coefficients but retains all predictors)
+* **0 < α < 1** → Elastic Net (mixed penalty; balances feature selection and stability)
+
+The analysis explores a broad grid of α and λ values using repeated cross-validation, enabling a systematic comparison of regularization regimes on the same dataset. All metabolite intensities are centered, scaled, and median-imputed within the training pipeline to prevent data leakage.
+
+## Data Preparation
+
+We use metabolite features from *03_EffectsAdjusted.csv*, with clinical group labels encoded as CN and AD. A stratified split (70%/30%) is applied to obtain independent training and testing sets, ensuring balanced representation of diagnostic groups in both partitions.
+
+## Cross-Validation and Hyperparameter Tuning
+
+Model training employs **10-fold repeated cross-validation** (5 repeats), optimized for the **area under the ROC curve (AUC-ROC)**. Parallel processing is used to reduce computational time.
+A tuning grid spanning several α values and a logarithmic sequence of λ values is passed explicitly to `caret`, ensuring transparent control over the regularization landscape.
+
+For each α:
+
+1. Models are fitted across a sequence of λ values (penalty strengths).
+2. Mean ROC across CV folds is calculated.
+3. The (α, λ) pair with the highest ROC is selected.
+
+This allows a direct comparison of LASSO, Ridge, and intermediate Elastic Net settings on equal footing.
+
+## Model Training and Selection
+
+The final model is refit using the optimal α–λ combination identified during cross-validation. Both the hyperparameters and their corresponding cross-validated performance are reported. A performance heatmap visualizes ROC values across the α × λ grid, illustrating how different regularization regimes influence discriminative accuracy.
+
+## Feature Selection and Interpretation
+
+Non-zero coefficients from the final model are extracted to identify metabolites contributing to classification. Features are ranked by absolute coefficient magnitude, and the top contributors are presented in tabular form and exported as `.csv` and `.rds` files for reproducibility.
+
+A dedicated visualization highlights the top 50 metabolites selected by the optimal Elastic Net model. This figure is saved in high resolution for inclusion in the main manuscript or supplementary figures.
+
+## Comparisons Across Regularization Types
+
+A summary table reports, for each α value:
+
+* Best cross-validated ROC
+* Corresponding λ value
+* Relative performance of LASSO, Ridge, and Elastic Net
+
+This allows readers to understand how penalization choices influence both predictive accuracy and sparsity, which is particularly relevant in omics contexts characterized by correlated features and high dimensionality.
+
+## Coefficient Path Visualization
+
+To illustrate shrinkage behavior in L1 regularization, we also include a LASSO coefficient path plot. This figure shows how metabolite coefficients enter the model as λ decreases, providing an intuitive representation of the sparsity-inducing mechanism.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(caret)
+library(glmnet)
+library(doParallel)
+library(dplyr)
+library(ggplot2)
+library(tibble)
+library(kableExtra)
+library(tidyr)
+library(readr)
+```
+
+# Load and prepare data
+
+```{r load}
+data <- read.csv("03_EffectsAdjusted.csv")
+data$Allgr <- factor(data$Allgr, levels = c("CN", "AD"))
+
+X <- data[, 8:ncol(data)]  
+y <- data$Allgr
+```
+
+# Train/test split
+
+```{r split}
+set.seed(123)
+train_index <- createDataPartition(y, p = 0.7, list = FALSE)
+
+trainX <- X[train_index, ]
+trainY <- y[train_index]
+
+testX  <- X[-train_index, ]
+testY  <- y[-train_index]
+```
+
+# caret training control (cross-validation set-up)
+
+```{r train}
+cl <- makeCluster(detectCores() - 2)
+registerDoParallel(cl)
+ctrl <- trainControl(
+    method = "repeatedcv",
+    number = 10,
+    repeats = 5,
+    summaryFunction = twoClassSummary,
+    classProbs = TRUE,
+    verboseIter = TRUE
+)
+```
+
+# Define α values to compare (regularization types)
+
+```{r compare_alpha}
+alpha_values <- c(0, 0.1, 0.5, 0.9, 1)  # ridge → elastic net → LASSO
+```
+
+# Tuning grid for glmnet
+
+```{r tuning}
+tune <- expand.grid(
+    alpha = alpha_values,
+    lambda = exp(seq(log(0.0001), log(1), length.out = 40))
+)
+```
+
+# Fit the model (Elastic-Net family)
+
+```{r fit_the_model}
+set.seed(123)
+fit <- train(
+    x = trainX,
+    y = trainY,
+    method = "glmnet",
+    metric = "ROC",
+    preProcess = c("center", "scale", "medianImpute"),
+    tuneGrid = tune,
+    trControl = ctrl
+)
+
+stopCluster(cl)
+registerDoSEQ()
+```
+
+# Results
+
+## Best Hyperparameters
+
+```{r best_hyper}
+best_alpha  <- fit$bestTune$alpha
+best_lambda <- fit$bestTune$lambda
+cat("Best α:", best_alpha, "\n")
+cat("Best λ:", best_lambda, "\n")
+```
+
+## Performance Heatmap (alpha × lambda)
+
+```{r results}
+#print(fit)
+plot(fit)    # performance heatmap over alpha × lambda
+```
+# Non-zero coefficients (selected features)
+
+```{r select_features}
+coef_matrix <- coef(fit$finalModel, s = best_lambda)
+selected <- coef_matrix[coef_matrix[,1] != 0, , drop = FALSE] |>
+    as.matrix() |>
+    as.data.frame() |>
+    rownames_to_column("Feature") |>
+    rename(Coefficient = 2) |>
+    dplyr::filter(Feature != "(Intercept)") |>
+    arrange(desc(abs(Coefficient)))
+
+kbl(head(selected, 20), caption = "Top 20 Selected Features") %>%
+kable_paper(full_width = FALSE)
+
+write.csv(selected, "Selected_Metabolites_EN.csv", row.names = FALSE)
+saveRDS(selected, "Selected_Metabolites_EN.rds")
+```
+
+
+---
+
+# Compare LASSO vs Ridge vs Elastic Net
+
+```{r}
+perf_table <- fit$results %>%
+group_by(alpha) %>%
+summarize(
+Best_ROC = max(ROC),
+Best_lambda = lambda[which.max(ROC)]
+)
+
+perf_table %>%
+kbl(caption = "Performance Comparison Across α Values") %>%
+kable_paper(full_width = FALSE)
+```
+
+
+I directly inspect performance across α values:
+
+```{r comparisons}
+library(ggplot2)
+
+ggplot(fit$results, aes(x = lambda, y = ROC, color = factor(alpha))) +
+    geom_line() +
+    scale_x_log10() +
+    labs(title = "Model performance across alpha values",
+         color = "alpha",
+         x = "lambda (log scale)",
+         y = "ROC") +
+    theme_minimal()
+
+
+```
+
+### Interpretation
+
+* **α = 1 (LASSO)** → sparsity, fewer features, can be unstable if predictors correlated
+* **α = 0 (Ridge)** → stable, handles multicollinearity, no feature selection
+* **α between 0–1 (Elastic Net)** → balanced; often best for metabolomics or omics
+
+My earlier model picked **α=0.1**, which is ⬅ ridge-dominant elastic net.
+
+# How glmnet chooses λ (and α) with cross-validation
+
+```sql
+For each α:
+   For each λ:
+      Fit 10 repeated CV folds
+      Compute mean ROC
+Select (α, λ) with highest mean ROC
+
+```
+
+
+## In glmnet (via caret):
+
+`alpha`
+
+* Controls the type of regularization
+* I supply α values in the tuning grid
+* caret tests all α across CV folds
+* Best α chosen by maximum ROC
+
+`lambda`
+
+* Controls penalty strength (how much shrinkage)
+* glmnet has a built-in λ path (100 values decreasing exponentially)
+* caret tests your supplied λ grid OR glmnet’s default λ path
+* For each α, caret evaluates many λ’s
+* It selects the λ with **highest ROC** averaged across CV folds
+
+---
+
+## Visual explanation
+
+For each α:
+
+```
+Train fold 1 → ROC for each λ
+Train fold 2 → ROC for each λ
+...
+Train fold K → ROC for each λ
+
+Take average ROC(λ); pick best λ
+```
+
+Then across α:
+
+```
+Best ROC(α = 0) = 0.78
+Best ROC(α = 0.1) = 0.81  ← chosen
+Best ROC(α = 0.5) = 0.80
+Best ROC(α = 1) = 0.77
+```
+
+Final model = α and λ with best overall ROC.
+
+---
+
+## If I want forced pure LASSO or pure Ridge
+
+### PURE LASSO (L1 only)
+
+```r
+tuneGrid = expand.grid(alpha = 1, lambda = exp(seq(log(0.001), log(1), length.out = 40)))
+```
+
+### PURE RIDGE (L2 only)
+
+```r
+tuneGrid = expand.grid(alpha = 0, lambda = exp(seq(log(0.001), log(1), length.out = 40)))
+```
+# LASSO Coefficient Path Plot
+
+```{r}
+lasso_path <- glmnet(
+    as.matrix(trainX),
+    trainY,
+    alpha = 1,
+    family = "binomial",
+    standardize = TRUE
+)
+
+plot(lasso_path, xvar = "lambda", label = TRUE)
+
+```
+
+# Top 50 features
+
+```{r fig.height=8, fig.width=7}
+top_features <- selected %>% head(50)
+
+p <- ggplot(
+    top_features,
+    aes(
+        x = reorder(Feature, abs(Coefficient)),
+        y = Coefficient,
+        fill = Coefficient > 0
+    )
+) +
+    geom_bar(stat = "identity") +
+    coord_flip() +
+    scale_fill_manual(values = c("#D55E00", "#0072B2")) +
+    theme_bw(base_size = 13) +
+    labs(
+        title = "Top 50 Features Selected by Elastic Net",
+        subtitle = paste(
+            "alpha =", best_alpha,
+            " | lambda =", round(best_lambda, 5)
+        ),
+        x = "Metabolites",
+        y = "Coefficient"
+    )
+
+p
+
+ggsave("Top50_EN_features_publication.png", p, width = 8, height = 10, dpi = 300)
+
+```
+

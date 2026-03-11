@@ -85,7 +85,7 @@ if (file.exists(lasso_path)) {
 lasso_imp <- varImp(lasso_model)$importance
 ranked_features <- rownames(lasso_imp)[order(lasso_imp$Overall, decreasing = TRUE)]
 
-# Limit to 57 metabolites
+# Limit to 196 metabolites
 ranked_features <- ranked_features[1:min(196, length(ranked_features))]
 
 auc_path <- "cache/auc_increase.rds"
@@ -145,7 +145,9 @@ text(optimal_index + 0.1, max(auc_increase) - 0.036,
 )
 dev.off()
 
-# Section: Permutation Test
+# Section: Permutation Test ====
+
+## Permutation test with shuffling on train set only ====
 
 # Number of permutations (optimized for reasonable runtime)
 perm_path <- "cache/permutation_aucs.rds"
@@ -192,9 +194,9 @@ p_value <- mean(perm_aucs >= actual_auc)
 cat("Permutation test p-value:", p_value, "\n")
 
 # Plot permutation test results
-png("results/permutation_test.png", width = 7.5, height = 7.5, units = "in", res = 300)
+png("results/permutation_test_train.png", width = 7.5, height = 7.5, units = "in", res = 300)
 hist(perm_aucs,
-    main = "Permutation Test AUC Distribution",
+    main = "Permutation Test AUC Distribution (Train Set Shuffling)",
     xlab = "AUC", breaks = 20, col = "lightblue",
     xlim = c(0, 1), ylim = c(0, 30),
     cex.lab = 1.2, cex.axis = 1.1, cex.main = 1.5
@@ -207,7 +209,10 @@ dev.off()
 
 ## best model
 best_model <- train(
-    x = train[, ranked_features[1:151]], y = train$Allgr, method = "glmnet", metric = "ROC",
+    x = train[
+        , ranked_features # [1:151]
+    ], # to change
+    y = train$Allgr, method = "glmnet", metric = "ROC",
     trControl = control, preProcess = c("zv", "center", "scale", "medianImpute")
 )
 
@@ -226,3 +231,175 @@ ggplot(top_metabolites, aes(x = Importance, y = forcats::fct_reorder(Metabolite,
     # geom_text(aes(label = round(Importance, 2)), hjust = -0.2, size = 5, fontface = "bold") +
     labs(title = "Top 25 Metabolites (LASSO Importance)", x = "Importance Score", y = "Metabolite") +
     theme(plot.title = element_text(hjust = 0.5, size = 16, face = "bold"))
+
+## Permutation test with shuffling on test set only ====
+perm_path <- "cache/permutation_aucs_test.rds"
+if (file.exists(perm_path)) {
+    cat("Loading saved permutation AUCs...\n")
+    perm_aucs <- readRDS(perm_path)
+} else {
+    cat("Running permutation test with shuffling on test set...\n")
+    n_perm <- 100
+    log_progress <- function(step, total_steps) {
+        cat(sprintf("Step %d of %d at %s\n", step, total_steps, Sys.time()),
+            file = "progress_log.txt", append = TRUE
+        )
+    }
+
+    cl <- makeCluster(detectCores() - 5)
+    registerDoParallel(cl)
+    with_progress({
+        p <- progressor(steps = n_perm)
+        perm_aucs_test <- foreach(
+            i = 1:n_perm, .combine = "c",
+            .packages = c("caret", "pROC", "glmnet")
+        ) %dopar% {
+            p(sprintf("Permutation %d", i))
+            log_progress(i, n_perm)
+            set.seed(i)
+            perm_test_labels <- sample(test$Allgr) # Shuffle the test set labels
+            model_perm_test <- train(
+                x = train[, ranked_features], y = train$Allgr,
+                method = "glmnet", trControl = control,
+                preProcess = c("zv", "center", "scale")
+            )
+            probs_perm_test <- predict(model_perm_test, test[, ranked_features], type = "prob")[, "AD"]
+            pROC::auc(roc(perm_test_labels, probs_perm_test, levels = c("CN", "AD"), direction = "<"))
+        }
+    })
+    stopCluster(cl)
+    unregister_dopar()
+    saveRDS(perm_aucs_test, perm_path)
+}
+
+
+# Plot permutation test results for shuffling test labels
+png("results/permutation_test_test_shuffling.png", width = 7.5, height = 7.5, units = "in", res = 300)
+hist(perm_aucs_test,
+    main = "Permutation Test AUC Distribution (Test Set Shuffling)",
+    xlab = "AUC", breaks = 20, col = "lightblue",
+    xlim = c(0, 1), ylim = c(0, 30),
+    cex.lab = 1.2, cex.axis = 1.1, cex.main = 1.5
+)
+abline(v = actual_auc, col = "red", lwd = 2)
+text(actual_auc - 0.14, 25, paste("Actual AUC:", round(actual_auc, 2)),
+    cex = 1, font = 3, col = "red"
+)
+dev.off()
+
+
+## Permutation test with shuffling on train and test sets ====
+perm_path <- "cache/permutation_aucs_train-test.rds"
+if (file.exists(perm_path)) {
+    cat("Loading saved permutation AUCs...\n")
+    perm_aucs <- readRDS(perm_path)
+} else {
+    cat("Running permutation test with shuffling on test set...\n")
+    n_perm <- 100
+    log_progress <- function(step, total_steps) {
+        cat(sprintf("Step %d of %d at %s\n", step, total_steps, Sys.time()),
+            file = "progress_log.txt", append = TRUE
+        )
+    }
+
+    cl <- makeCluster(detectCores() - 5)
+    registerDoParallel(cl)
+    with_progress({
+        p <- progressor(steps = n_perm)
+        perm_aucs_test <- foreach(
+            i = 1:n_perm, .combine = "c",
+            .packages = c("caret", "pROC", "glmnet")
+        ) %dopar% {
+            p(sprintf("Permutation %d", i))
+            log_progress(i, n_perm)
+            set.seed(i)
+            perm_train_labels <- sample(train$Allgr) # Shuffle the test set labels
+            perm_test_labels <- sample(test$Allgr) # Shuffle the test set labels
+            model_perm_test <- train(
+                x = train[, ranked_features], y = perm_train_labels,
+                method = "glmnet", trControl = control,
+                preProcess = c("zv", "center", "scale")
+            )
+            probs_perm_test <- predict(model_perm_test, test[, ranked_features], type = "prob")[, "AD"]
+            pROC::auc(roc(perm_test_labels, probs_perm_test, levels = c("CN", "AD"), direction = "<"))
+        }
+    })
+    stopCluster(cl)
+    unregister_dopar()
+    saveRDS(perm_aucs_test, perm_path)
+}
+
+# Plot permutation test results for shuffling test labels
+png("results/permutation_test_train-test_shuffling.png", width = 7.5, height = 7.5, units = "in", res = 300)
+hist(perm_aucs_test,
+    main = "Permutation Test AUC Distribution (Whole Dataset Shuffling)",
+    xlab = "AUC", breaks = 20, col = "lightblue",
+    xlim = c(0, 1), ylim = c(0, 30),
+    cex.lab = 1.2, cex.axis = 1.1, cex.main = 1.5
+)
+abline(v = actual_auc, col = "red", lwd = 2)
+text(actual_auc - 0.14, 25, paste("Actual AUC:", round(actual_auc, 2)),
+    cex = 1, font = 3, col = "red"
+)
+dev.off()
+
+
+## Permutation test with shuffling the entire dataset ====
+perm_path <- "cache/permutation_aucs_all.rds"
+if (file.exists(perm_path)) {
+    cat("Loading saved permutation AUCs...\n")
+    perm_aucs <- readRDS(perm_path)
+} else {
+    cat("Running permutation test with shuffling the entire dataset...\n")
+    n_perm <- 100
+    log_progress <- function(step, total_steps) {
+        cat(sprintf("Step %d of %d at %s\n", step, total_steps, Sys.time()),
+            file = "progress_log.txt", append = TRUE
+        )
+    }
+
+    cl <- makeCluster(detectCores() - 5)
+    registerDoParallel(cl)
+    with_progress({
+        p <- progressor(steps = n_perm)
+        perm_aucs_all <- foreach(
+            i = 1:n_perm, .combine = "c",
+            .packages = c("caret", "pROC", "glmnet")
+        ) %dopar% {
+            p(sprintf("Permutation %d", i))
+            log_progress(i, n_perm)
+            set.seed(i)
+
+            # Shuffle the entire dataset (features and labels)
+            permuted_data <- train
+            permuted_data$Allgr <- sample(permuted_data$Allgr) # Shuffle the labels
+            permuted_data[, selected_features] <- permuted_data[, selected_features[sample(length(selected_features))]] # Shuffle the features
+
+            model_perm_all <- train(
+                x = permuted_data[, ranked_features], y = permuted_data$Allgr,
+                method = "glmnet", trControl = control,
+                preProcess = c("zv", "center", "scale")
+            )
+
+            probs_perm_all <- predict(model_perm_all, test[, ranked_features], type = "prob")[, "AD"]
+            pROC::auc(roc(test$Allgr, probs_perm_all, levels = c("CN", "AD"), direction = "<"))
+        }
+    })
+    stopCluster(cl)
+    unregister_dopar()
+    saveRDS(perm_aucs_all, perm_path)
+}
+
+# Plot permutation test results for shuffling entire dataset
+png("results/permutation_test_all_shuffling.png", width = 7.5, height = 7.5, units = "in", res = 300)
+hist(perm_aucs_all,
+    main = "Permutation Test AUC Distribution (Feature and Labels Shuffling)",
+    xlab = "AUC", breaks = 20, col = "lightblue",
+    xlim = c(0, 1), ylim = c(0, 30),
+    cex.lab = 1.2, cex.axis = 1.1, cex.main = 1.5
+)
+abline(v = actual_auc, col = "red", lwd = 2)
+text(actual_auc - 0.14, 25, paste("Actual AUC:", round(actual_auc, 2)),
+    cex = 1, font = 3, col = "red"
+)
+dev.off()

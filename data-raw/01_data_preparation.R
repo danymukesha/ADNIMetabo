@@ -59,7 +59,7 @@ follow_up_clinical_data <- adnimerge %>%
 
 # Biomarker data ====
 biomarker_data <- adnimerge %>%
-    dplyr::select(RID, ABETA, TAU, PTAU, FDG, PIB, AV45)
+    dplyr::select(RID, VISCODE, ABETA, TAU, PTAU, FDG, PIB, AV45)
 
 # Imaging data ====
 imaging_data <- adnimerge %>%

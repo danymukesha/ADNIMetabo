@@ -1,0 +1,402 @@
+---
+title: "Additional file 2: Supplementary Materials"
+subtitle: "WGCNA"
+author: "Mukesha et al."
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    self_contained: true
+    code_folding: hide
+  word_document:
+    toc: true
+  pdf_document:
+    toc: true
+    latex_engine: xelatex
+bibliography: AD_vs_CN_references.bib
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+# WGCNA analysis
+
+WGCNA pipeline for metabolomics
+    - Assumes you have data frames in your environment:
+    - data_matrix (the full dataset: rows = samples, columns include 
+    metabolite columns and clinical cols)
+    - top_metabolite_table (columns: Metabolite, Class, LipidFlag)  
+        -- metabolites selected by LASSO
+
+```{r set-up}
+required <- c("WGCNA","tidyverse","impute","pheatmap","viridis","ggpubr",
+              "igraph","ggraph")
+to_install <- required[!(required %in% installed.packages()[,"Package"])]
+if (length(to_install)) install.packages(to_install, 
+                                        repos = "https://cloud.r-project.org")
+
+library(WGCNA)
+library(tidyverse)
+library(impute)
+library(pheatmap)
+library(viridis)
+library(ggpubr)
+library(igraph)
+library(ggraph)
+
+library(readr)
+
+options(stringsAsFactors = FALSE)
+enableWGCNAThreads() 
+
+set.seed(12345)
+```
+
+
+## Prepare expression matrix
+
+Choose which metabolites to use:
+
+```{r load-data}
+use_lasso_selected <- TRUE
+
+data_full <- read_csv("onlyselectedADvsCN.csv") |>
+    as_tibble()
+sapply(colnames(data_full), ADNIMetabo::transform_colnames, 
+                         USE.NAMES = FALSE)
+
+top_metabolite_table <- read.csv("results/top_metabolite_table.csv") |>
+    as_tibble()
+
+if (use_lasso_selected) {
+  met_list <- unique(top_metabolite_table$Metabolite)
+  missing_mets <- setdiff(met_list, colnames(data_full))
+  if (length(missing_mets) > 0) {
+    message(
+        "Warning: some metabolites from top_metabolite_table not found in data_full: ",
+        paste(missing_mets, collapse = ", "))
+  }
+  expr_df <- data_full %>% dplyr::select(all_of(intersect(met_list, colnames(data_full))))
+} else {
+  clinical_cols <- c("RID","APOE4","Gender","Age","Allgr","Plate","V1")
+  expr_df <- data_full %>% dplyr::select(where(is.numeric), -any_of(clinical_cols))
+}
+
+cat("Expression matrix dims (samples x metabolites):", dim(expr_df), "\n")
+
+# transpose to WGCNA format: rows = samples, columns = genes (metabolites)
+dataExpr <- as.data.frame(expr_df)
+rownames(dataExpr) <- NULL # keep default numeric rownames for now
+```
+
+## Missing data handling
+
+WGCNA tolerates some missingness but imputation recommended for metabolomics
+
+```{r missing-data-handling}
+na_frac <- sum(is.na(dataExpr)) / prod(dim(dataExpr))
+cat(sprintf("Overall missing fraction: %.4f\n", na_frac))
+
+# for more than tiny fraction, do kNN imputation (impute::impute.knn)
+if (na_frac > 0) {
+  # impute.knn expects matrix with 
+  # -> rows = genes/metabolites, and 
+  # -> cols = samples 
+  # Then => transpose
+  knn_in <- t(as.matrix(dataExpr))
+  knn_out <- impute::impute.knn(knn_in, k = 10)
+  datExpr <- as.data.frame(t(knn_out$data))
+} else {
+  datExpr <- dataExpr
+}
+```
+
+## Remove metabolites with (near) zero variance
+
+```{r rm-metabo-with-no-variance}
+varv <- apply(datExpr, 2, var, na.rm = TRUE)
+keep_cols <- names(varv)[varv > 1e-6]
+datExpr <- datExpr[, keep_cols, drop = FALSE]
+cat("After removing zero-variance metabolites, ncol =", ncol(datExpr), "\n")
+```
+
+```{r optional}
+sample_names <- data_full$RID
+if (is.null(sample_names)) sample_names <- paste0("S", seq_len(nrow(datExpr)))
+rownames(datExpr) <- sample_names
+```
+
+## Prepare traits
+
+```{r prepare-traits}
+traits <- data_full %>% select(RID, APOE4, Gender, Age, Allgr) %>% as.data.frame()
+rownames(traits) <- sample_names  # assume row order matches -> very important!
+# if the order mismatches, i must align by RID.
+
+# let's convert Group & Gender to numeric factors for correlation:
+traits$Group <- as.numeric(factor(traits$Allgr, levels = c("CN","AD"))) # CN=1,AD=2 -> convert to 0/1
+traits$Group <- traits$Group - 1
+traits$APOE4 <- as.numeric(traits$APOE4)  # assuming numeric 0/1/2
+traits$GenderNum <- as.numeric(factor(traits$Gender)) - 1 # e.g. MALE=0 FEMALE=1
+clinical_traits <- traits %>% select(Group, APOE4, GenderNum, Age)
+```
+
+## Check for goodSamples/goodGenes/metabolites
+
+```{r check-good-data}
+gsg <- goodSamplesGenes(datExpr, verbose = 3)
+if (!gsg$allOK) {
+  # rm offending genes/samples
+  if (sum(!gsg$goodGenes) > 0) {
+    cat("Removing bad genes:", paste(colnames(datExpr)[!gsg$goodGenes], 
+                                     collapse = ", "), "\n")
+    datExpr <- datExpr[, gsg$goodGenes]
+  }
+  if (sum(!gsg$goodSamples) > 0) {
+    cat("Removing bad samples:", paste(rownames(datExpr)[!gsg$goodSamples], 
+                                       collapse = ", "), "\n")
+    datExpr <- datExpr[gsg$goodSamples, ]
+    clinical_traits <- clinical_traits[gsg$goodSamples, , drop = FALSE]
+  }
+}
+```
+
+## Choose soft-threshold power
+
+For metabolomics, signed network often makes sense. 
+I will compute recommended powers.
+
+```{r soft-threshold}
+powers <- c(c(1:10), seq(12, 20, 2))
+sft <- pickSoftThreshold(datExpr,
+    powerVector = powers,
+    verbose = 5,
+    networkType = "signed"
+)
+
+png("WGCNA_SoftThreshold.png", width = 900, height = 600, res = 150)
+par(mfrow = c(1, 2))
+plot(sft$fitIndices[, 1], 
+     -sign(sft$fitIndices[, 3]) * sft$fitIndices[, 2],
+     xlab = "Soft Threshold (power)", 
+     ylab = "Scale Free Topology Model Fit, signed R^2",
+     main = "Scale independence"
+)
+abline(h = 0.8, col = "red", lty = 2)
+plot(sft$fitIndices[, 1], sft$fitIndices[, 5],
+    xlab = "Soft Threshold (power)", 
+    ylab = "Mean connectivity", 
+    main = "Mean connectivity"
+)
+dev.off()
+```
+
+Choose power:
+
+automatic pick: smallest power with R^2 > 0.8, otherwise use 6 or 8
+
+```{r choose-power}
+powerTable <- sft$fitIndices
+selPower <- min(powerTable$Power[ powerTable$SFT.R.sq > 0.6 ], na.rm = TRUE)
+if (is.infinite(selPower) || is.na(selPower)) selPower <- 6
+cat("Selected soft-threshold power:", selPower, "\n")
+```
+
+## Build adjacency and TOM, cluster genes
+
+Use signed network; TOMType = "signed"
+
+```{r build-adjacency-and-TOM}
+adjacency <- adjacency(datExpr, power = selPower, type = "signed")
+TOM <- TOMsimilarity(adjacency, TOMType = "signed")
+dissTOM <- 1 - TOM
+
+geneTree <- hclust(as.dist(dissTOM), method = "average")
+
+# module detection with dynamic tree cut
+minModuleSize <- 20   # for metabolites, can be smaller (e.g., 10) depending on data
+dynamicMods <- cutreeDynamic(dendro = geneTree, distM = dissTOM,
+                             deepSplit = 2, pamRespectsDendro = TRUE,
+                             minClusterSize = minModuleSize)
+moduleColors <- labels2colors(dynamicMods)
+
+# merge close modules based on eigengene correlation
+MEList <- moduleEigengenes(datExpr, colors = moduleColors)
+MEs <- MEList$eigengenes
+# calculate dissimilarity of module eigengenes
+MEDiss <- 1 - cor(MEs)
+METree <- hclust(as.dist(MEDiss), method = "average")
+# merge threshold
+mergeCutHeight <- 0.25
+merge <- mergeCloseModules(datExpr, moduleColors, cutHeight = mergeCutHeight, verbose = 3)
+mergedColors <- merge$colors
+mergedMEs <- merge$newMEs
+
+moduleColors <- mergedColors
+MEs <- mergedMEs
+```
+
+## Visualize dendrogram + module colors
+
+```{r}
+png("WGCNA_Dendrogram_modules.png", width = 1400, height = 700, res = 180)
+plotDendroAndColors(geneTree, moduleColors, "Dynamic Tree Cut + Merged",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05,
+                    main = "Metabolite clustering dendrogram")
+dev.off()
+
+```
+
+## Module-trait relationships
+
+```{r}
+moduleTraitCor <- cor(MEs, clinical_traits, use = "p")
+moduleTraitPvalue <- corPvalueStudent(moduleTraitCor, 
+                                      nSamples = nrow(datExpr))
+
+textMatrix <- paste0(signif(moduleTraitCor, 2), 
+                     "\n(", signif(moduleTraitPvalue,2), ")")
+png("WGCNA_ModuleTraitHeatmap.png", width = 800, height = 900, res = 150)
+par(mar = c(6, 8, 3, 3))
+labeledHeatmap(Matrix = moduleTraitCor,
+               xLabels = colnames(clinical_traits),
+               yLabels = names(MEs),
+               ySymbols = names(MEs),
+               colorLabels = FALSE,
+               colors = colorRampPalette(
+                   rev(brewer.pal(n = 7, name = "RdYlBu"))
+                   )(50),
+               textMatrix = textMatrix,
+               setStdMargins = FALSE,
+               cex.text = 0.8,
+               zlim = c(-1,1),
+               main = "Module-trait relationships (correlation (p-value))")
+dev.off()
+```
+
+## Eigengene plots for key modules
+
+pick top modules significantly associated with Group (AD)
+
+```{r}
+modCorDF <- tibble(
+    Module = rownames(moduleTraitCor),
+    corGroup = moduleTraitCor[, "Group"],
+    pGroup = moduleTraitPvalue[, "Group"]
+) %>%
+    arrange(pGroup)
+topMods <- modCorDF$Module[1:min(4, nrow(modCorDF))] # top 4
+
+# Prepare eigengene data for plotting
+MEs_df <- MEs %>% as.data.frame()
+MEs_df$Sample <- rownames(datExpr)
+MEs_long <- pivot_longer(MEs_df, cols = starts_with("ME"), 
+                         names_to = "Module", values_to = "Eigengene")
+MEs_long <- left_join(MEs_long, clinical_traits %>% 
+                          mutate(Sample = rownames(clinical_traits)), 
+                      by = c("Sample" = "Sample"))
+# Keep only top modules
+MEs_long_sub <- MEs_long %>% filter(Module %in% topMods)
+
+pEig <- ggplot(MEs_long_sub, aes(x = factor(Group), y = Eigengene, 
+                                 fill = factor(Group))) +
+    geom_boxplot(outlier.size = 0.6, linewidth = 0.25) +
+    facet_wrap(~Module, scales = "free_y", ncol = 2) +
+    scale_fill_manual(values = c("0" = "#2166AC", "1" = "#B2182B"), 
+                      labels = c("CN", "AD")) +
+    theme_classic(base_size = 12) +
+    labs(x = "", y = "Module eigengene", 
+         title = "Module eigengenes by Group (AD vs CN)") +
+    theme(legend.position = "none")
+ggsave("WGCNA_Eigengene_boxplots.png", pEig, width = 8, 
+       height = 6, dpi = 300)
+```
+
+
+## Identify hub metabolites in each module
+
+calculate intramodular connectivity (kME) as correlation to module eigengene
+
+```{r}
+kME <- as.data.frame(signedKME(datExpr, MEs))
+# For each module, list top hubs
+hubs_list <- lapply(names(MEs), function(me){
+  mname <- sub("^ME", "", me)
+  kcol <- kME[[me]]
+  dfh <- tibble(Metabolite = colnames(datExpr), kME = kcol,
+                Module = mname) %>%
+    arrange(desc(kME))
+  head(dfh, 10)
+})
+names(hubs_list) <- names(MEs)
+
+# Save hub table for the top module associated with Group
+topModuleName <- topMods[1]
+topModuleShort <- sub("^ME", "", topModuleName)
+hubs_top <- hubs_list[[topModuleName]]
+write.csv(hubs_top, paste0("WGCNA_Hubs_topModule_", 
+                           topModuleShort, ".csv"), 
+          row.names = FALSE)
+```
+
+
+```{r}
+# ---------- 11. Visualize network of top module (top hub metabolites) ----------
+# pick a module to show network (top associated with Group)
+moduleGenes <- colnames(datExpr)[moduleColors == topModuleShort]
+cat("Number of genes in top module", topModuleShort, ":", length(moduleGenes), "\n")
+# If module big, pick top 30 by kME
+topN <- min(30, length(moduleGenes))
+kme_sub <- kME[moduleGenes, paste0("ME", topModuleShort), drop=FALSE]
+topGenes <- rownames(kme_sub)[order(-kme_sub[[1]])][1:topN]
+
+# Create subnetwork TOM for topGenes
+subTOM <- TOM[topGenes, topGenes]
+gmat <- graph_from_adjacency_matrix(subTOM, mode="undirected", weighted=TRUE, diag=FALSE)
+V(gmat)$label <- topGenes
+# node size by kME
+kme_vals <- kME[topGenes, paste0("ME", topModuleShort)]
+V(gmat)$size <- scales::rescale(kme_vals, to = c(3,8))
+# color nodes by lipidFlag if available
+if("LipidFlag" %in% colnames(top_metabolite_table)) {
+  lipflag <- top_metabolite_table %>% filter(Metabolite %in% topGenes) %>% select(Metabolite, LipidFlag)
+  lipmap <- setNames(lipflag$LipidFlag, lipflag$Metabolite)
+  V(gmat)$lip <- lipmap[V(gmat)$label]
+  # create palette
+  pal <- c("lipid"="#2b8cbe","non-lipid"="#f03b20")
+  V(gmat)$color <- pal[ as.character(V(gmat)$lip) ]
+  V(gmat)$color[is.na(V(gmat)$color)] <- "grey40"
+} else {
+  V(gmat)$color <- "grey40"
+}
+
+# plot with ggraph
+png(paste0("WGCNA_network_topModule_", topModuleShort, ".png"), width=900, height=900, res=150)
+ggraph(gmat, layout = "fr") +
+  geom_edge_link(aes(width = weight), alpha = 0.4, colour = "grey60") +
+  geom_node_point(aes(size = size, color = I(V(gmat)$color))) +
+  geom_node_text(aes(label=label), repel=TRUE, size=3) +
+  theme_void() +
+  ggtitle(paste("Top-module network:", topModuleShort))
+dev.off()
+
+# ---------- 12. Export for Cytoscape ----------
+# Export edge and node tables for Cytoscape (for the top module)
+cyt <- exportNetworkToCytoscape(subTOM,
+                               edgeFile = paste0("CytoscapeInput-edges-", topModuleShort, ".txt"),
+                               nodeFile = paste0("CytoscapeInput-nodes-", topModuleShort, ".txt"),
+                               weighted = TRUE,
+                               threshold = 0.1,    # edge weight threshold for Cytoscape export
+                               nodeNames = topGenes,
+                               nodeAttr = kme_vals)
+cat("Cytoscape files written for module", topModuleShort, "\n")
+
+# ---------- 13. Save workspace objects of interest ----------
+save(list = c("datExpr", "moduleColors", "MEs", "hubs_list"), file = "WGCNA_results_metabolomics.RData")
+
+cat("WGCNA analysis complete. Results and figures saved to working directory.\n")
+
+```
+

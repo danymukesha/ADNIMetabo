@@ -51,6 +51,7 @@ library(caret)
 library(glmnet)
 library(pROC)
 library(randomForest)
+library(xgboost)
 library(doParallel)
 library(data.table)
 library(precrec)
@@ -76,6 +77,11 @@ unregister_dopar <- function() {
 }
 set.seed(123)
 ```
+
+```{r}
+sessionInfo()
+```
+
 
 # Data Loading and Preprocessing
 
@@ -135,6 +141,8 @@ test <- rbind(test_CN, test_AD)
 
 train$Allgr <- as.factor(train$Allgr)
 test$Allgr <- as.factor(test$Allgr)
+# train$Allgr <- factor(train$Allgr, levels = c("AD", "CN")) # TO RECONSIDER!!
+
 ```
 
 # Model Training
@@ -184,7 +192,7 @@ train_or_load <- function(model_name, train_func, reload = TRUE, save = TRUE) {
         cat("Loading saved", model_name, "model...\n")
         readRDS(model_file)
     } else {
-        cl <- makeCluster(detectCores() - 5)
+        cl <- makeCluster(detectCores() - 3)
         registerDoParallel(cl)
         
         cat("Training", model_name, "model...\n")
@@ -234,7 +242,7 @@ models$xgb <- train_or_load("xgb", function() {
         metric = "ROC",
         trControl = control, preProcess = c("zv", "center", "scale", "medianImpute"), 
         verbosity = 0)
-})
+}, reload = FALSE)
 ```
 
 # Model Evaluation
@@ -546,35 +554,19 @@ top_metabolite_table <- tibble(
 )
 top_metabolite_table |> filter(Class == "Unknown")
 top_metabolite_table
-write.csv(file = "151_metabolite_panel.csv", x = top_metabolite_table)
+write.csv(file = "151_metabolite_panel.csv", x = top_metabolite_table,
+          quote = FALSE)
+
+write.csv(file = "all_metabolite_panel.csv", 
+          data[8:ncol(data)] |> 
+              colnames() |>
+              as.data.frame(),
+          row.names = FALSE, 
+          quote = FALSE, 
+          col.names = FALSE)
 
 top_metabolite_summary <- top_metabolite_table %>%
   count(Class, sort = TRUE)
-
-ggplot(top_metabolite_summary, 
-       aes(x = reorder(Class, n), y = n)) +
-    geom_col(fill = "#1f78b4", width = 0.6) +
-    geom_text(aes(label = n), 
-              hjust = -0.1, size = 4.5, color = "black", family = "sans") +
-    coord_flip(clip = "off") +
-    scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
-    labs(
-        title = "Biochemical Classes of Top-Ranked Metabolites Identified by LASSO",
-        subtitle = "Derived from the Biocrates MxP® Quant 500 panel",
-        x = NULL,
-        y = "Number of Selected Metabolites",
-        caption = "LASSO-selected metabolites grouped by biochemical class (n = 630 total panel metabolites)."
-    ) +
-    theme_classic(base_size = 14) +
-    theme(
-        plot.title = element_text(face = "bold", size = 16, hjust = 0),
-        plot.subtitle = element_text(size = 12),
-        plot.caption = element_text(size = 10, color = "gray40", hjust = 0),
-        axis.text.y = element_text(size = 12),
-        axis.text.x = element_text(size = 12),
-        axis.ticks = element_blank(),
-        panel.grid = element_blank()
-    )
 ```
 
 
@@ -586,7 +578,7 @@ p1 <- ggplot(top_metabolite_summary, aes(x = reorder(Class, n), y = n)) +
   coord_flip(clip = "off") +
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
   labs(
-    title = "A. Biochemical Class Distribution",
+    title = "Biochemical Class Distribution",
     subtitle = "Top-ranked metabolites selected by LASSO",
     x = NULL,
     y = "Count"
@@ -601,6 +593,8 @@ p1 <- ggplot(top_metabolite_summary, aes(x = reorder(Class, n), y = n)) +
     panel.grid = element_blank()
   )
 
+
+
 # ---- Panel B: Bubble plot of importance (LASSO vs PLS) ----
 # Optional: keep top 30 only for clarity
 bubble_data <- finalimp %>%
@@ -612,7 +606,7 @@ p2 <- ggplot(bubble_data, aes(x = LASSO, y = PLS, size = Size, label = Metabolit
   ggrepel::geom_text_repel(size = 3, max.overlaps = 20) +
   scale_size(range = c(4, 14), guide = "none") +
   labs(
-    title = "B. Variable Importance in LASSO vs PLS",
+    title = "Variable Importance in LASSO vs PLS",
     subtitle = "Bubble size reflects average importance",
     x = "LASSO Importance",
     y = "PLS Importance"
@@ -629,6 +623,40 @@ p1 + p2 + plot_layout(ncol = 2) +
     theme = theme(plot.title = element_text(face = "bold", size = 12))
   )
 
+```
+
+```{r}
+pplot <- top_metabolite_summary %>%
+  arrange(n) %>%
+  mutate(Class = factor(Class, levels = Class)) %>%
+  ggplot(aes(x = Class, y = n)) +
+  geom_text(aes(label = n), hjust = -0.30, size = 4.3, 
+            color = "black", family = "sans") +
+  geom_col(width = 0.15, fill = "grey20") +
+  geom_segment(aes(xend = Class, y = 0, yend = n),
+               color = "grey40", linewidth = 1) +
+  geom_point(size = 1.5, color = "black", width = 0.7, fill = "grey20") +
+  coord_flip() +
+  labs(x = NULL, y = "Number of Metabolites", 
+    title = "Biochemical Class Distribution",
+    subtitle = "Top-ranked 151 metabolites selected panel by LASSO",
+    caption = "Derived from the Biocrates MxP® Quant 500 panel") +
+  theme_bw() +
+  theme(
+    panel.border = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(size = 12, family = "Helvetica"),
+    axis.title.y = element_blank(),
+    axis.title.x = element_text(size = 14, family = "Helvetica"),
+    plot.title = element_text(size = 16, face = "bold", family = "Helvetica"),
+    plot.caption = element_text(size = 10, color = "gray40", hjust = 0),
+    plot.margin = ggplot2::margin(10, 15, 10, 10),
+  )
+
+pplot
+ggsave("top_metabolite_summary.png", pplot, 
+       height = 5.7, width = 7.8, dpi = 700)
 ```
 
 ```{r eval=FALSE, include=FALSE}
@@ -715,7 +743,11 @@ p <- ADNIMetabo::plot_and_save_roc(roc_top, "roc_curve_top.png",
 p
 ```
 
-# Incorporating *APOE* Genotype
+# Various models
+
+## APOE
+
+### Incorporating APOE Genotype
 
 A model using only the *APOE* genotype was trained to evaluate its
 standalone predictive power. The model was assessed on the test set,
@@ -758,7 +790,7 @@ p <- ADNIMetabo::plot_and_save_roc(roc_with_apoe, "roc_curve_with_apoe.png",
 p
 ```
 
-# Exclusively *APOE* Genotype
+### Exclusively APOE Genotype
 
 A model using only the *APOE* genotype was trained to evaluate its
 standalone predictive power. The model was assessed on the test set,
@@ -792,7 +824,7 @@ p <- ADNIMetabo::plot_and_save_roc(roc_only_apoe, "roc_curve_only_apoe.png",
 p
 ```
 
-The *APOE* ε4 allele is the strongest known genetic risk factor for
+The *APOE* ε4 allele is the strongest known genetic risk factor for
 late-onset Alzheimer's disease [@corder1993gene]. As expected, a model
 using only the APOE genotype showed significant predictive power,
 achieving an AUC of 0.75 on the test set. This result aligns with
@@ -808,7 +840,9 @@ within APOE ε4 carriers and non-carriers, and that they reflect the
 downstream physiological consequences of genetic and other risk factors
 [@odonovan2019apoe].
 
-# Incorporating MMSE Assessment
+## MMSE
+
+### Incorporating MMSE Assessment
 
 The Mini-Mental State Examination (MMSE) baseline scores were
 incorporated by joining clinical data with the training and test
@@ -848,7 +882,7 @@ p <- ADNIMetabo::plot_and_save_roc(roc_with_mmse, "roc_curve_with_mmse.png",
 p
 ```
 
-# Exclusively MMSE
+### Exclusively MMSE
 
 A LASSO model using only MMSE scores was trained to evaluate its
 standalone predictive power. A dummy variable was added to ensure model
@@ -880,6 +914,209 @@ p <- ADNIMetabo::plot_and_save_roc(roc_only_mmse, "roc_curve_only_MMSE.png",
                        title = "ROC Curve for Only MMSE")
 p
 ```
+## AD biomarker
+
+### Incorporating AD biomarkers (e.g., PET imaging or plasma p-Tau217)
+
+This part of analysis was added for a suggestion of comparing
+the performance of the metabolite panel plus APOE e4 status to that 
+of established AD biomarkers (e.g., PET imaging or plasma p-Tau217) 
+or even require AD biomarker positivity to be considered an AD case. 
+
+Given that a clinical AD diagnosis without AD biomarkers is often 
+misdiagnosed, a metabolomics panel that predicts clinical AD diagnosis
+will also be inaccurate, including non-AD dementia, and not helpful 
+to clinicians.
+
+```{r ADbiomarker_inclusion}
+clean_biomarkers <- function(df) {
+  df %>%
+    mutate(
+      ABETA = na_if(ABETA, ""),
+      ABETA = str_replace(ABETA, ">", ""),
+      ABETA = as.numeric(ABETA),
+
+      TAU = na_if(TAU, ""),
+      TAU = str_replace(TAU, ">", ""),
+      TAU = as.numeric(TAU),
+
+      FDG = as.numeric(FDG)
+    )
+}
+
+ADbiomarker <- c("ABETA", "FDG", "TAU")
+train_with_ADbiomarker <- train_with_mmse |>
+    left_join(ADNIMetabo::biomarker_data |> filter(VISCODE == "bl") |> unique() |>
+                  select(RID, ADbiomarker), by = "RID") |>
+    clean_biomarkers()
+
+test_with_ADbiomarker <- test_with_mmse  |>
+    left_join(ADNIMetabo::biomarker_data |> filter(VISCODE == "bl") |> unique() |>
+                  select(RID, ADbiomarker), by = "RID") |>
+    clean_biomarkers()
+
+features_with_ADbiomarker <- c(top_features, train_with_ADbiomarker |> 
+                            dplyr::select(starts_with("APOE"), ADbiomarker) |> 
+                            colnames())
+
+set.seed(123)
+lasso_reduced_withADbiomarker <- train_or_load("lasso_reduced_withADbiomarker", function() {
+    train(x = train_with_ADbiomarker[, features_with_ADbiomarker], y = train_with_ADbiomarker$Allgr,
+          method = "glmnet", metric = "ROC", trControl = control,
+          preProcess = c("zv", "center", "scale", "medianImpute"))
+})
+
+ADbiomarker_probs <- predict(lasso_reduced_withADbiomarker, test_with_ADbiomarker, type = "prob")[, "AD"]
+roc_with_ADbiomarker <- pROC::roc(test_with_ADbiomarker$Allgr, ADbiomarker_probs, 
+                           levels = c("CN", "AD"), direction = "<")
+
+auc_ci <- ci.auc(roc_with_ADbiomarker)
+p <- ADNIMetabo::plot_and_save_roc(roc_with_ADbiomarker, "roc_curve_with_ADbiomarker.png",
+                       line_color =  "blue", auc_digits = 2, 
+                        width = 6, height = 6, 
+                       title = "ROC Curve with Top ~150 Metabolites + APOE + established AD biomarkers")
+p
+```
+
+### Exclusively AD biomarkers
+
+A LASSO model using only AD biomarkers was trained to evaluate its
+standalone predictive power. A dummy variable was added to ensure model
+stability. Performance was assessed on the test set with ROC curves.
+
+```{r}
+features_only_ADbiomarker <- c("Allgr", train_with_ADbiomarker |> 
+                            dplyr::select(ABETA, FDG, TAU) |> 
+                            colnames())
+
+train_only_ADbiomarker <- train_with_ADbiomarker[, features_only_ADbiomarker, drop = FALSE]
+test_only_ADbiomarker <- test_with_ADbiomarker[, features_only_ADbiomarker, drop = FALSE]
+
+set.seed(123)
+model_only_ADbiomarker <- train_or_load("model_only_ADbiomarker", function() {
+    train(x = train_only_ADbiomarker |> dplyr::select(-Allgr), y = train_with_ADbiomarker$Allgr,
+          method = "glmnet", metric = "ROC", trControl = control,
+          preProcess = c("zv", "center", "scale", "medianImpute"))
+})
+
+ADbiomarker_probs <- predict(model_only_ADbiomarker, test_only_ADbiomarker, type = "prob")[, "AD"]
+roc_only_ADbiomarker <- roc(test_only_ADbiomarker$Allgr, ADbiomarker_probs, 
+                     levels = c("CN", "AD"), direction = "<")
+p <- ADNIMetabo::plot_and_save_roc(roc_only_ADbiomarker, "roc_curve_only_ADbiomarker.png",
+                       line_color =  "blue", 
+                        width = 6, height = 6, 
+                       title = "ROC Curve for Only AD biomarker")
+p
+```
+
+### APOE + AD biomarkers
+
+A LASSO model using APOE + AD biomarkers was trained to evaluate its
+standalone predictive power. A dummy variable was added to ensure model
+stability. Performance was assessed on the test set with ROC curves.
+
+```{r}
+features_APOE_ADbiomarker <- c("Allgr", train_with_ADbiomarker |> 
+                            dplyr::select(starts_with("APOE"), ABETA, FDG, TAU) |> 
+                            colnames())
+
+train_APOE_ADbiomarker <- train_with_ADbiomarker[, features_APOE_ADbiomarker, drop = FALSE]
+test_APOE_ADbiomarker <- test_with_ADbiomarker[, features_APOE_ADbiomarker, drop = FALSE]
+
+set.seed(123)
+model_APOE_ADbiomarker <- train_or_load("model_APOE_ADbiomarker", function() {
+    train(x = train_APOE_ADbiomarker |> dplyr::select(-Allgr), y = train_with_ADbiomarker$Allgr,
+          method = "glmnet", metric = "ROC", trControl = control,
+          preProcess = c("zv", "center", "scale", "medianImpute"))
+})
+
+ADbiomarker_probs <- predict(model_APOE_ADbiomarker, test_APOE_ADbiomarker, type = "prob")[, "AD"]
+roc_APOE_ADbiomarker <- roc(test_APOE_ADbiomarker$Allgr, ADbiomarker_probs, 
+                     levels = c("CN", "AD"), direction = "<")
+p <- ADNIMetabo::plot_and_save_roc(roc_APOE_ADbiomarker, "roc_curve_APOE_ADbiomarker.png",
+                       line_color =  "blue", 
+                        width = 6, height = 6, 
+                       title = "ROC Curve for APOE + ADbiomarker")
+p
+```
+
+## Lipidomics Panel
+
+```{r}
+lipomics_panel <- top_metabolite_table |>
+  filter(Class %in% c("Triglycerides", "Diglycerides", 
+                      "Phosphatidylcholines", "Fatty Acids", 
+                      "Acylcarnitines", "Bile Acids", 
+                      "Sphingomyelins", "Ceramides", 
+                      "Cholesteryl Esters"))
+```
+
+### Only lipids
+
+```{r lipids_inclusion}
+lipid_features <- lipomics_panel$Metabolite
+
+set.seed(123)
+lasso_lipid <- train_or_load("lasso_lipid", function() {
+    train(x = train[, lipid_features], y = train$Allgr, method = "glmnet",
+        metric = "ROC", trControl = control,
+        preProcess = c("zv", "center", "scale", "medianImpute"))
+})
+
+model_labels <- c(model_labels, lasso_lipid = "LASSO only Lipid")
+
+top_probs <- predict(lasso_lipid, test[, lipid_features], type = "prob")[, "AD"]
+
+roc_top <- roc(test$Allgr, top_probs, levels = c("CN", "AD"), 
+                direction = "<") 
+
+p <- ADNIMetabo::plot_and_save_roc(roc_top, "roc_curve_lipid.png",
+                        line_color =  "blue", ci_auc = TRUE,
+                        width = 6, height = 6, 
+                        title = "ROC Curve for Lipids")
+p
+```
+
+### Non-lipids
+
+```{r}
+set.seed(123)
+lasso_nolipid <- train_or_load("lasso_lipid", function() {
+    train(x = train[, !(colnames(train) %in% lipid_features)], y = train$Allgr, method = "glmnet",
+        metric = "ROC", trControl = control,
+        preProcess = c("zv", "center", "scale", "medianImpute"))
+}, reload = FALSE)
+
+model_labels <- c(model_labels, lasso_nolipid = "LASSO No Lipid")
+
+top_probs <- predict(lasso_nolipid, test[, !(colnames(test) %in% lipid_features)], type = "prob")[, "AD"]
+
+roc_top <- roc(test$Allgr, top_probs, levels = c("CN", "AD"), 
+                direction = "<") 
+
+p <- ADNIMetabo::plot_and_save_roc(roc_top, "roc_curve_nolipid.png",
+                        line_color =  "blue", ci_auc = TRUE,
+                        width = 6, height = 6, 
+                        title = "ROC Curve for Non-Lipids")
+p
+```
+
+```{r}
+lipid_classes <- c(
+  "Triglycerides", "Diglycerides", "Phosphatidylcholines", 
+  "Fatty Acids", "Acylcarnitines", "Bile Acids",
+  "Sphingomyelins", "Ceramides", "Cholesteryl Esters"
+)
+
+top_metabolite_table <- top_metabolite_table |>
+  mutate(LipidFlag = if_else(Class %in% lipid_classes, "lipid", "non-lipid"))
+
+
+write.csv(top_metabolite_table, "results/top_metabolite_table.csv", row.names = FALSE)
+```
+
+
+## Combination
 
 ```{r}
 models$lasso_reduced <- lasso_reduced
@@ -896,6 +1133,15 @@ model_labels <- c(model_labels, lasso_reduced_withMMSE = "LASSO with MMSE")
 
 models$lasso_onlyMMSE <- model_only_mmse
 model_labels <- c(model_labels, lasso_onlyMMSE = "LASSO only MMSE")
+
+models$lasso_reduced_withADbiomarker <- lasso_reduced_withADbiomarker
+model_labels <- c(model_labels, lasso_reduced_withADbiomarker = "LASSO with ADbiomarker")
+
+models$lasso_onlyADbiomarker <- model_only_ADbiomarker
+model_labels <- c(model_labels, lasso_onlyADbiomarker = "LASSO only ADbiomarker")
+
+models$lasso_APOEADbiomarker <- model_APOE_ADbiomarker
+model_labels <- c(model_labels, lasso_APOEADbiomarker = "LASSO APOE + ADbiomarker")
 ```
 
 The Mini-Mental State Examination (MMSE) is a well-established clinical
@@ -929,13 +1175,13 @@ test$Allgr <- factor(test$Allgr, levels = c("CN", "AD"))
 
 threshold <- round(nrow(AD) / (nrow(AD) + nrow(CN)), 3)
 
-# model_labels <- c(
-#     lasso = "LASSO",
-#     rf = "Random Forest",
-#     nb = "Naive Bayes",
-#     pls = "PLS",
-#     xgb = "XGBoost"
-# )
+model_labels <- c(
+    lasso = "LASSO",
+    rf = "Random Forest",
+    nb = "Naive Bayes",
+    pls = "PLS",
+    xgb = "XGBoost"
+)
 
 roc_data_list <- list()
 metrics_list <- list()
@@ -945,7 +1191,10 @@ for (model_name in names(models)) {
                            "lasso_reduced_withAPOE", 
                            "lasso_onlyAPOE", 
                            "lasso_reduced_withMMSE",
-                           "lasso_onlyMMSE")) {
+                           "lasso_onlyMMSE",
+                           "lasso_reduced_withADbiomarker",
+                           "lasso_onlyADbiomarker", 
+                           "lasso_APOEADbiomarker")) {
         if (model_name == "lasso_reduced_withAPOE") {
             x_test <-  test_with_apoe[,c("Allgr", features_with_apoe)]
         } else if (model_name == "lasso_onlyAPOE") {
@@ -956,6 +1205,12 @@ for (model_name in names(models)) {
             x_test <- test_with_mmse
         } else if (model_name == "lasso_onlyMMSE") {
             x_test <- test_only_mmse
+        } else if (model_name == "lasso_reduced_withADbiomarker") {
+            x_test <- test_with_ADbiomarker
+        } else if (model_name == "lasso_onlyADbiomarker") {
+            x_test <- test_only_ADbiomarker
+        } else if (model_name == "lasso_APOEADbiomarker") {
+            x_test <- test_APOE_ADbiomarker
         } else {
             x_test <- test
         }
@@ -1088,16 +1343,19 @@ colnames(summary_table) <- c("Model", "Accuracy", "95% Confidence Interval",
 
 summary_table_print <- summary_table
 
+library(dplyr)
+library(stringr)
+
 summary_table_print |>
   mutate(across(where(is.numeric), ~ round(.x, 2))) |>
-  mutate(`95% Confidence Interval` = str_replace_all(
-    `95% Confidence Interval`,
-    "\\(([^,]+),\\s*([^)]+)\\)",
-    function(m) {
-      nums <- as.numeric(str_match(m, "\\(([^,]+),\\s*([^)]+)\\)")[, 2:3])
-      paste0("(", sprintf("%.2f", nums[1]), ", ", sprintf("%.2f", nums[2]), ")")
+  mutate(
+    `95% Confidence Interval` = {
+      ci_nums <- str_match(`95% Confidence Interval`, "\\(([^,]+),\\s*([^)]+)\\)")
+      paste0("(", 
+             sprintf("%.2f", as.numeric(ci_nums[,2])), ", ", 
+             sprintf("%.2f", as.numeric(ci_nums[,3])), ")")
     }
-  )) |>
+  ) |>
     kableExtra::kbl(caption = "Summary table", row.names = F) |>
     kableExtra::kable_classic(full_width = TRUE, html_font = "Cambria") |>
     kableExtra::kable_styling(bootstrap_options = "striped", 
@@ -1125,8 +1383,6 @@ cohorts, and to investigate the performance in differentiating AD from
 other dementias and in predicting future cognitive decline in
 pre-symptomatic individuals [@huynh2021standardisation].
 
-# Model evaluation on Clinical Data
-
 ```{r model_eval_on_clinical,  fig.width=8, fig.height=6, fig.align='left'}
 roc_data_clinic <- roc_data |>
     dplyr::filter(model %in%
@@ -1140,13 +1396,13 @@ roc_data_clinic <- roc_data |>
     dplyr::mutate(
         auc_label = case_when(
             model == "LASSO without APOE" ~ sub("LASSO without APOE", 
-                                                "~150 metabolites", auc_label),
+                                                "151 metabolites", auc_label),
             model == "LASSO with APOE" ~ sub("LASSO with APOE", 
-                                             "~150 metabolites + APOE", auc_label),
+                                             "151 metabolites + APOE", auc_label),
             model == "LASSO only APOE" ~ sub("LASSO only APOE", 
                                              "APOE alone", auc_label),
             model == "LASSO with MMSE" ~ sub("LASSO with MMSE", 
-                                             "~150 metabolites + APOE + MMSE", auc_label),
+                                             "151 metabolites + APOE + MMSE", auc_label),
             model == "LASSO only MMSE" ~ sub("LASSO only MMSE", "MMSE alone", auc_label)
         )
     )
@@ -1220,6 +1476,48 @@ ggsave("results/roc_curves_testset_with_apoe.png", gg_roc_test, height = 5,
        width = 6, dpi = 700)
 ```
 
+```{r}
+roc_data_clinic_few <- roc_data_clinic %>%
+  # mutate(label = str_replace(label, "^~150 metabolites \\+ APOE", "LASSO with APOE"),
+  #        label = str_replace(label, "^~150 metabolites", "LASSO without APOE"),
+  #        label = str_replace(label, "^APOE alone", "LASSO only APOE")) |>
+    group_by(label) %>%
+  mutate(mean_auc = mean(auc, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(label = forcats::fct_reorder(label, mean_auc, .desc = TRUE)) %>%
+  select(-mean_auc)
+
+gg_roc_test_few <- ggplot(roc_data_clinic_few |> 
+           dplyr::filter(!model %in% c("LASSO with MMSE", "LASSO only MMSE"))
+                      ,aes(x = 1 - roc_df.fpr, y = roc_df.tpr, color = label)) +
+    geom_line(size = 1) +
+    geom_abline(linetype = "dashed", color = "gray40") +
+    labs(
+        x = "1 - Specificity", y = "Sensitivity",
+        title = "ROC Curves on Test Set",
+        subtitle = "Comparison of Machine Learning Models on Held-Out Data",
+        caption = "Binary classification: AD vs CN"
+    ) +
+    theme_bw() +
+    theme(
+        plot.title = element_text(hjust = 0.5, face = "bold"),
+        plot.subtitle = element_text(hjust = 0.5, size = 8),
+        plot.caption = element_text(hjust = 1, face = "italic"),
+        legend.title = element_blank(),
+        legend.position = c(0.61, 0.15),
+        legend.text = element_text(size = 7.6),
+        legend.key.size = unit(0.45, "cm"),
+        axis.text.y = element_text(size = 11, angle = 90, hjust = 0.5),
+        axis.text.x = element_text(size = 11),
+        axis.title = element_text(size = 11)
+    ) +
+    coord_fixed()
+gg_roc_test_few
+ggsave("results/roc_curves_testset_with_apoe_few.png", gg_roc_test_few, height = 5, 
+       width = 6, dpi = 700)
+```
+
+
 ```{r eval=TRUE, fig.width=14 , fig.height=6, fig.align='left', out.width='100%'}
 plot_summary_final <- summary_table_print |>
     dplyr::filter(!Model %in% c("LASSO", "Random Forest", "Naive Bayes", 
@@ -1235,7 +1533,16 @@ plot_summary_final <- summary_table_print |>
             Model == "LASSO with MMSE" ~ sub("LASSO with MMSE", 
                                              "~150 metabolites + APOE + MMSE", Model),
             Model == "LASSO only MMSE" ~ sub("LASSO only MMSE", 
-                                             "MMSE alone", Model)
+                                             "MMSE alone", Model),
+            
+            Model == "LASSO with ADbiomarker" ~ sub("LASSO with ADbiomarker", 
+                                             "~150 metabolites + APOE + AD biomarker", Model),
+            Model == "LASSO APOE with ADbiomarker" ~ sub("LASSO APOE with ADbiomarker", 
+                                             "AD biomarker alone", Model),
+            Model == "LASSO only ADbiomarker" ~ sub("LASSO only ADbiomarker", 
+                                             "AD biomarker alone", Model),
+            Model == "LASSO APOE + ADbiomarker" ~ sub("LASSO APOE + ADbiomarker", 
+                                             "APOE with AD biomarker", Model)
         )
     ) |> 
     dplyr::arrange(AUC) |>
@@ -1250,8 +1557,9 @@ plot_summary_final <- summary_table_print |>
   scale_fill_gradientn(colors = brewer.pal(9, "Blues"), limits = c(0.5, 1)) +
   theme_minimal(base_size = 13) +
   labs(
-    title = "Performance of Metabolites-APOE-MMSE-based Models",
-    x = "Metric", y = "Model", fill = "Score"
+    title = "Performance of Multimodal Metabolite–APOE–MMSE–AD Biomarker Models",
+    subtitle = "Comparison of model accuracy across clinical and molecular feature combinations",
+    x = "Performance Metric", y = "Model", fill = "Score"
   ) +
   theme(
     axis.text.x = element_text(angle = 0, hjust =  0.5, size = 14),
@@ -1264,6 +1572,59 @@ ggsave("results/heatmap_plot_summary_final.png", plot_summary_final,
 plot_summary_final
 ```
 
+```{r eval=TRUE, fig.width=14 , fig.height=6, fig.align='left', out.width='100%'}
+plot_summary_final <- summary_table_print |>
+    dplyr::filter(!Model %in% c("LASSO", "Random Forest", "Naive Bayes", 
+                       "PLS", "XGBoost", "LASSO with MMSE", "LASSO only MMSE",
+                       "LASSO with ADbiomarker", "LASSO only ADbiomarker",
+                       "LASSO APOE with ADbiomarker")) |>
+    dplyr::mutate(
+        Model = case_when(
+            Model == "LASSO without APOE" ~ sub("LASSO without APOE", 
+                                                "151 metabolites", Model),
+            Model == "LASSO with APOE" ~ sub("LASSO with APOE", 
+                                             "151 metabolites + APOE", Model),
+            Model == "LASSO only APOE" ~ sub("LASSO only APOE", 
+                                             "APOE alone", Model),
+            Model == "LASSO APOE + ADbiomarker" ~ sub("LASSO APOE + ADbiomarker", 
+                                             "APOE + AD biomarker", Model)
+        )
+    ) |> 
+    dplyr::arrange(AUC) |>
+  dplyr::mutate(Model = factor(Model, levels = unique(Model))) |> 
+  dplyr::select(where(is.numeric), Model) |>
+  dplyr::select(!c("Positive Predictive Value (PPV)", "Negative Predictive Value (NPV)", 
+            "Balanced Accuracy")) |>
+  pivot_longer(-Model, names_to = "Metric", values_to = "Score") |>
+  ggplot(aes(x = Metric, y = Model, fill = Score)) +
+  geom_tile(color = "grey90") +
+  geom_text(aes(label = round(Score, 2)), size = 6, colour = "white") +
+  scale_fill_gradientn(colors = brewer.pal(9, "Blues"), limits = c(0.5, 1)) +
+  theme_minimal(base_size = 13) +
+  labs(
+    title = "Performance of Metabolites-APOE-based Models",
+    x = "Metric", y = "Model", fill = "Score"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust =  0.5, size = 14),
+    axis.text.y = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+ggsave("results/heatmap_plot_summary_few.png", plot_summary_final,
+       width = 11, height = 3, dpi = 700)
+
+plot_summary_final
+```
+
+```{r}
+summary_table_print |>
+  filter(
+    !Model %in% c("LASSO", "Random Forest", "Naive Bayes",
+                  "PLS", "XGBoost"),
+    !str_detect(Model, "ADbiomarker|MMSE")
+  )
+```
+
 # All confusion matrices
 
 ```{r fig.width=9, fig.height=9, fig.align='left', out.width='100%'}
@@ -1271,13 +1632,13 @@ model_names <- roc_data |>
     dplyr::mutate(
         model = case_when(
             model == "LASSO without APOE" ~ sub("LASSO without APOE",
-                                                "~150 metabolites", model),
+                                                "151 metabolites", model),
             model == "LASSO with APOE" ~ sub("LASSO with APOE", 
-                                             "~150 metabolites + APOE", model),
+                                             "151 metabolites + APOE", model),
             model == "LASSO only APOE" ~ sub("LASSO only APOE", 
                                              "APOE alone", model),
             model == "LASSO with MMSE" ~ sub("LASSO with MMSE", 
-                                             "~150 metabolites + APOE + MMSE", model),
+                                             "151 metabolites + APOE + MMSE", model),
             model == "LASSO only MMSE" ~ sub("LASSO only MMSE", 
                                              "MMSE alone", model),
             
@@ -1323,6 +1684,8 @@ combined_plot_all <- wrap_plots(conf_plots, ncol = 3) +
 ggsave("results/confusion_matrices_all_models.png", combined_plot_all,
        width = 9, height = 7, dpi = 700)
 
+combined_plot_all
+
 combined_plot <- wrap_plots(conf_plots[6:8], ncol = 3) + 
   plot_annotation(title = "Confusion Matrices for Optimal Models with/without APOE",
                   caption = "Optimal model (151 metabolites)", 
@@ -1330,9 +1693,16 @@ combined_plot <- wrap_plots(conf_plots[6:8], ncol = 3) +
                                                           face = "bold")))
 
 ggsave("results/confusion_matrices_all_models_withAPOE.png", combined_plot,
-       width = 9, height = 6, dpi = 700)
+       width = 9, height = 5, dpi = 700)
 
-combined_plot_all
+
+combined_plot <- wrap_plots(conf_plots[1:6], ncol = 3) + 
+  plot_annotation(caption = "Optimal model (151 metabolites)", 
+                  theme = theme(plot.title = element_text(hjust = 0.5, size = 14, 
+                                                          face = "bold")))
+
+ggsave("results/confusion_matrices_all_models_withoutAPOE.png", combined_plot,
+       width = 9, height = 5, dpi = 700)
 
 ```
 
@@ -1413,10 +1783,10 @@ setnames(cv_performance,
 cv_performance_cleaned <- cv_performance[, lapply(.SD, function(x) if (is.numeric(x)) round(x, 2) else x)] |>
         dplyr::mutate(
         Model = case_when(
-            Model == "lasso_reduced" ~ sub("lasso_reduced", "~150 metabolites", Model),
-            Model == "lasso_reduced_withAPOE" ~ sub("lasso_reduced_withAPOE", "~150 metabolites + APOE", Model),
+            Model == "lasso_reduced" ~ sub("lasso_reduced", "151 metabolites", Model),
+            Model == "lasso_reduced_withAPOE" ~ sub("lasso_reduced_withAPOE", "151 metabolites + APOE", Model),
             Model == "lasso_onlyAPOE" ~ sub("lasso_onlyAPOE", "APOE alone", Model),
-            Model == "lasso_reduced_withMMSE" ~ sub("lasso_reduced_withMMSE", "~150 metabolites + APOE + MMSE", Model),
+            Model == "lasso_reduced_withMMSE" ~ sub("lasso_reduced_withMMSE", "151 metabolites + APOE + MMSE", Model),
             Model == "lasso_onlyMMSE" ~ sub("lasso_onlyMMSE", "MMSE alone", Model),
             
             Model == "lasso" ~ sub("lasso", "LASSO", Model),

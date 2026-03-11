@@ -8,6 +8,7 @@ plot_and_save_roc(
   roc_obj,
   filename = "roc_curve.png",
   title = "ROC Curve",
+  subtitle = NULL,
   width = 5,
   height = 5,
   line_color = "blue",
@@ -27,6 +28,8 @@ plot_and_save_roc(
 \item{filename}{Output filename for the saved plot (e.g., "roc_curve.png").}
 
 \item{title}{Title of the plot.}
+
+\item{subtitle}{Subtitle of the plot.}
 
 \item{width}{Width of the saved image in inches.}
 
